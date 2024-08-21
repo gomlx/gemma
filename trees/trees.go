@@ -1,4 +1,4 @@
-package tree
+package trees
 
 import (
 	"fmt"
@@ -16,6 +16,8 @@ type Node[T any] struct {
 	// Map is set for non-leaf nodes (and nil in leaf nodes).
 	Map map[string]*Node[T]
 }
+
+func (n *Node[T]) IsLeaf() bool { return n.Map == nil }
 
 // Tree holds the root node for a Tree-like structure, as parallel to the PyTree structure.
 // It also provides several convenience methods of access.
@@ -50,7 +52,7 @@ func (tree *Tree[T]) Insert(treePath Path, value T) {
 			// Skip empty path components
 			continue
 		}
-		if node.Map == nil {
+		if node.IsLeaf() {
 			node.Map = make(map[string]*Node[T])
 		}
 		newNode := node.Map[pathElement]
@@ -94,8 +96,15 @@ func nodeToString[T any](parts []string, name string, subTree *Node[T], indent i
 }
 
 // Map converts a Tree[T1] to a Tree[T2] by calling mapFn at every element.
-func Map[T1, T2 any](tree *Tree[T1], mapFn func(T1) T2) *Tree[T2] {
-	return nil
+func Map[T1, T2 any](tree1 *Tree[T1], mapFn func(Path, T1) T2) *Tree[T2] {
+	if tree1.Root.IsLeaf() {
+		return New(NewLeaf(mapFn(nil, tree1.Root.Value)))
+	}
+	tree2 := New(NewMap[T2]())
+	for p, t1 := range tree1.Leaves() {
+		tree2.Insert(p, mapFn(p, t1))
+	}
+	return tree2
 }
 
 // Leaves returns an iterator that goes over all the leaf nodes of the Tree.
