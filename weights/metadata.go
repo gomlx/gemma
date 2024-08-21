@@ -3,6 +3,7 @@ package weights
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/gomlx/gemma/trees"
 	"github.com/gomlx/gomlx/ml/data"
 	"github.com/pkg/errors"
 	"os"
@@ -19,7 +20,7 @@ const (
 )
 
 // ReadMetadata returns the metadata loaded from the given directory in the form of a tree.
-func ReadMetadata(checkpointDir string) (tree *Tree[*Metadata], err error) {
+func ReadMetadata(checkpointDir string) (tree *trees.Tree[*Metadata], err error) {
 	checkpointDir = data.ReplaceTildeInDir(checkpointDir)
 	metadataPath := path.Join(checkpointDir, MetadataFileName)
 	var f *os.File
@@ -65,14 +66,14 @@ const (
 	KeyTypeDict                     = 2
 )
 
-func fromJsonTreeMetaData(jsonTree any) (tree *Tree[*Metadata], err error) {
+func fromJsonTreeMetaData(jsonTree any) (tree *trees.Tree[*Metadata], err error) {
 	mapAny, ok := jsonTree.(map[string]any)
 	if !ok {
 		err = errors.Errorf("expected json to be a map of strings, got %T instead", jsonTree)
 		return
 	}
 	_ = mapAny
-	tree = NewTree(NewMapNode[*Metadata]())
+	tree = trees.New(trees.NewMap[*Metadata]())
 	for key, value := range mapAny {
 		switch key {
 		case KeyUseZarr3:
@@ -114,7 +115,7 @@ func fromJsonTreeMetaData(jsonTree any) (tree *Tree[*Metadata], err error) {
 	return
 }
 
-func parseJsonMetadataEntry(tree *Tree[*Metadata], keyPath string, jsonEntry map[string]any) error {
+func parseJsonMetadataEntry(tree *trees.Tree[*Metadata], keyPath string, jsonEntry map[string]any) error {
 	entry := &Metadata{}
 	if err := parseKeyPath(entry, keyPath); err != nil {
 		return err
@@ -169,4 +170,8 @@ func parseKeyMetadata(metadata *Metadata, keyMetadataJson []any) {
 func parseValueMetadata(metadata *Metadata, valueMetadataJson map[string]any) {
 	metadata.ValueType = valueMetadataJson["value_type"].(string)
 	metadata.SkipDeserialize = valueMetadataJson["skip_deserialize"].(bool)
+}
+
+func ParamNames(metadata *trees.Tree[*Metadata]) *trees.Tree[string] {
+	return nil
 }

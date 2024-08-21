@@ -11,6 +11,9 @@ import (
 
 const (
 	AggregateFileName = "checkpoint"
+
+	// OCDBTManifestFileName indicates usage of "Orbax Consistent Distributed Backend Tree" (OCDBT).
+	OCDBTManifestFileName = "manifest.ocdbt"
 )
 
 // ReadAggregate of checkpoint. Not used by Gemma v2.
@@ -28,4 +31,10 @@ func ReadAggregate(checkpointDir string) (results any, err error) {
 	results, err = dec.DecodeMap()
 	defer func() { _ = f.Close() }()
 	return
+}
+
+func isOCDBT(checkpointDir string) bool {
+	checkpointDir = data.ReplaceTildeInDir(checkpointDir)
+	ocdbtPath := path.Join(checkpointDir, OCDBTManifestFileName)
+	return data.FileExists(ocdbtPath)
 }
