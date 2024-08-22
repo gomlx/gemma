@@ -2,11 +2,14 @@
 package weights
 
 import (
+	"github.com/gomlx/gemma/trees"
 	"github.com/gomlx/gomlx/ml/data"
+	"github.com/janpfeifer/must"
 	"github.com/pkg/errors"
 	"github.com/vmihailenco/msgpack"
 	"os"
 	"path"
+	"strings"
 )
 
 const (
@@ -37,4 +40,23 @@ func isOCDBT(checkpointDir string) bool {
 	checkpointDir = data.ReplaceTildeInDir(checkpointDir)
 	ocdbtPath := path.Join(checkpointDir, OCDBTManifestFileName)
 	return data.FileExists(ocdbtPath)
+}
+
+type ParamInfo struct {
+	Name, Path      string
+	SkipDeserialize bool
+}
+
+func ReadParamInfo(checkpointDir string) *trees.Tree[*ParamInfo] {
+	checkpointDir = data.ReplaceTildeInDir(checkpointDir)
+	metadata := must.M1(ReadMetadata(checkpointDir))
+	return trees.Map(metadata, func(p trees.Path, meta *Metadata) *ParamInfo {
+		name := strings.Join(p, ".")
+		pi := &ParamInfo{
+			Name:            name,
+			Path:            path.Join(checkpointDir, name),
+			SkipDeserialize: meta.SkipDeserialize,
+		}
+		return pi
+	})
 }

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"regexp"
+	"strings"
 )
 
 const (
@@ -172,6 +173,9 @@ func parseValueMetadata(metadata *Metadata, valueMetadataJson map[string]any) {
 	metadata.SkipDeserialize = valueMetadataJson["skip_deserialize"].(bool)
 }
 
+// ParamNames convert metadata to the paramNames (?? not sure where in Gemma this is sued)
 func ParamNames(metadata *trees.Tree[*Metadata]) *trees.Tree[string] {
-	return nil
+	return trees.Map(metadata, func(treePath trees.Path, metadata *Metadata) string {
+		return strings.Join(treePath, ".")
+	})
 }
