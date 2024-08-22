@@ -26,3 +26,6 @@ go.work.sum
 
 # GoLand IDE
 .idea
+
+# Python script, local venv.
+venv
