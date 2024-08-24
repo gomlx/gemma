@@ -5,6 +5,7 @@ package sentencepiece
 
 import (
 	esentencepiece "github.com/eliben/go-sentencepiece"
+	"github.com/gomlx/gomlx/types/xslices"
 	"github.com/pkg/errors"
 )
 
@@ -24,30 +25,41 @@ func NewFromPath(vocabPath string) (*Processor, error) {
 
 type Token = esentencepiece.Token
 
-// BeginningOfSentence returns the corresponding token, aka "bos".
-func (p *Processor) BeginningOfSentence() Token {
-	return Token{
-		ID: 2,
-	}
+// Encode returns the text encoded into a sequence of ids.
+func (p *Processor) Encode(text string) []int {
+	tokens := p.Processor.Encode(text)
+	return xslices.Map(tokens, func(t Token) int { return t.ID })
 }
 
-// EndOfSentence returns the corresponding token, aka "eos".
-func (p *Processor) EndOfSentence() Token {
-	return Token{
-		ID: 1,
-	}
+// Decode returns the text from a sequence of ids.
+func (p *Processor) Decode(ids []int) string {
+	return p.Processor.Decode(ids)
 }
 
-// Unknown returns the corresponding token, aka "unk".
-func (p *Processor) Unknown() Token {
-	return Token{
-		ID: 3,
-	}
+// BeginningOfSentenceId returns the corresponding token, aka "bos".
+//
+// TODO: read from tokenizer model instead.
+func (p *Processor) BeginningOfSentenceId() int {
+	return 2
 }
 
-// Pad returns the corresponding token, aka "pad".
-func (p *Processor) Pad() Token {
-	return Token{
-		ID: 0,
-	}
+// EndOfSentenceId returns the corresponding token, aka "eos".
+//
+// TODO: read from tokenizer model instead.
+func (p *Processor) EndOfSentenceId() int {
+	return 1
+}
+
+// UnknownId returns the corresponding token, aka "unk".
+//
+// TODO: read from tokenizer model instead.
+func (p *Processor) UnknownId() int {
+	return 3
+}
+
+// PadId returns the corresponding token, aka "pad".
+//
+// TODO: read from tokenizer model instead.
+func (p *Processor) PadId() int {
+	return 0
 }
