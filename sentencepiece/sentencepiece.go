@@ -25,14 +25,16 @@ func NewFromPath(vocabPath string) (*Processor, error) {
 
 type Token = esentencepiece.Token
 
-// Encode returns the text encoded into a sequence of ids.
-func (p *Processor) Encode(text string) []int {
+// EncodeAsIds returns the text encoded into a sequence of ids.
+// It implements sampler.Vocabulary.
+func (p *Processor) EncodeAsIds(text string) []int {
 	tokens := p.Processor.Encode(text)
 	return xslices.Map(tokens, func(t Token) int { return t.ID })
 }
 
-// Decode returns the text from a sequence of ids.
-func (p *Processor) Decode(ids []int) string {
+// DecodeIds returns the text from a sequence of ids.
+// It implements sampler.Vocabulary.
+func (p *Processor) DecodeIds(ids []int) string {
 	return p.Processor.Decode(ids)
 }
 
