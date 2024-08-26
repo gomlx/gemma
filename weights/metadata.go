@@ -141,7 +141,7 @@ func parseJsonMetadataEntry(tree *trees.Tree[*Metadata], keyPath string, jsonEnt
 		return errors.Errorf("invalid ValueMetadata (key %q) type %T, expected map[string]any", KeyValueMetadata, valueMetadataJsonAny)
 	}
 	parseValueMetadata(entry, valueMetadataJson)
-	tree.Insert(entry.KeyPath, entry)
+	tree.Set(entry.KeyPath, entry)
 	return nil
 }
 

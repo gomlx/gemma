@@ -25,43 +25,15 @@ func NewFromPath(vocabPath string) (*Processor, error) {
 
 type Token = esentencepiece.Token
 
-// EncodeAsIds returns the text encoded into a sequence of ids.
+// EncodeAsIDs returns the text encoded into a sequence of ids.
 // It implements sampler.Vocabulary.
-func (p *Processor) EncodeAsIds(text string) []int {
+func (p *Processor) EncodeAsIDs(text string) []int {
 	tokens := p.Processor.Encode(text)
 	return xslices.Map(tokens, func(t Token) int { return t.ID })
 }
 
-// DecodeIds returns the text from a sequence of ids.
+// DecodeIDs returns the text from a sequence of ids.
 // It implements sampler.Vocabulary.
-func (p *Processor) DecodeIds(ids []int) string {
+func (p *Processor) DecodeIDs(ids []int) string {
 	return p.Processor.Decode(ids)
-}
-
-// BeginningOfSentenceId returns the corresponding token, aka "bos".
-//
-// TODO: read from tokenizer model instead.
-func (p *Processor) BeginningOfSentenceId() int {
-	return 2
-}
-
-// EndOfSentenceId returns the corresponding token, aka "eos".
-//
-// TODO: read from tokenizer model instead.
-func (p *Processor) EndOfSentenceId() int {
-	return 1
-}
-
-// UnknownId returns the corresponding token, aka "unk".
-//
-// TODO: read from tokenizer model instead.
-func (p *Processor) UnknownId() int {
-	return 3
-}
-
-// PadId returns the corresponding token, aka "pad".
-//
-// TODO: read from tokenizer model instead.
-func (p *Processor) PadId() int {
-	return 0
 }

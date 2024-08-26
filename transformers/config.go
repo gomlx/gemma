@@ -113,7 +113,7 @@ func (c *Config) setGemma2_2B() {
 	c.FinalLogitSoftCap = 30.0
 	c.AttentionTypes = nil
 	for _ = range c.NumLayers / 2 {
-		c.AttentionTypes = append(c.AttentionTypes, []AttentionType{AttentionTypeLocalSliding, AttentionTypeLocalSliding}...)
+		c.AttentionTypes = append(c.AttentionTypes, []AttentionType{AttentionTypeLocalSliding, AttentionTypeGlobal}...)
 	}
 	c.UsePostAttentionNorm = true
 	c.UsePostFFWNorm = true
@@ -121,3 +121,5 @@ func (c *Config) setGemma2_2B() {
 	c.AttentionLogitsSoftCap = 50.0
 	c.SlidingWindowSize = 4096
 }
+
+func (c *Config) InitCache() map

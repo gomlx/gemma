@@ -105,7 +105,7 @@ func ReadConvertedWeights(checkpointDir string) (tree *trees.Tree[*tensors.Tenso
 		}
 		treePath := strings.Split(filePath, "/")
 		treePath = treePath[:len(treePath)-1]
-		tree.Insert(treePath, tensor)
+		tree.Set(treePath, tensor)
 		return nil
 	})
 	if err != nil {
