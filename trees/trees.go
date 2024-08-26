@@ -2,6 +2,7 @@ package trees
 
 import (
 	"fmt"
+	"github.com/gomlx/exceptions"
 	"github.com/gomlx/gomlx/types/xslices"
 	"golang.org/x/exp/slices"
 	"iter"
@@ -42,8 +43,8 @@ func NewLeaf[T any](value T) *Node[T] {
 	return &Node[T]{Value: value}
 }
 
-// Insert value in treePath, creating intermediary nodes where needed.
-func (tree *Tree[T]) Insert(treePath Path, value T) {
+// Set value in treePath, populating intermediary nodes where needed.
+func (tree *Tree[T]) Set(treePath Path, value T) {
 	node := tree.Root
 	for len(treePath) > 0 {
 		pathElement := treePath[0]
@@ -102,7 +103,7 @@ func Map[T1, T2 any](tree1 *Tree[T1], mapFn func(Path, T1) T2) *Tree[T2] {
 	}
 	tree2 := New(NewMap[T2]())
 	for p, t1 := range tree1.Leaves() {
-		tree2.Insert(p, mapFn(p, t1))
+		tree2.Set(p, mapFn(p, t1))
 	}
 	return tree2
 }
@@ -111,19 +112,77 @@ func Map[T1, T2 any](tree1 *Tree[T1], mapFn func(Path, T1) T2) *Tree[T2] {
 // The key is a Path, and value is T.
 func (tree *Tree[T]) Leaves() iter.Seq2[Path, T] {
 	return func(yield func(Path, T) bool) {
-		recursiveLeaves(nil, tree.Root, yield)
+		recursiveLeaves(nil, tree.Root, false, yield)
 	}
 }
 
-func recursiveLeaves[T any](treePath Path, node *Node[T], yield func(Path, T) bool) bool {
+// NumLeaves traverses the trees and returns the number of leaf nodes.
+func (tree *Tree[T]) NumLeaves() int {
+	var count int
+	for _, _ = range tree.Leaves() {
+		count++
+	}
+	return count
+}
+
+// OrderedLeaves returns an iterator that goes over all the leaf nodes of the Tree in alphabetical order of the
+// tree nodes (depth-first).
+//
+// The key is a Path, and value is T.
+func (tree *Tree[T]) OrderedLeaves() iter.Seq2[Path, T] {
+	return func(yield func(Path, T) bool) {
+		recursiveLeaves(nil, tree.Root, true, yield)
+	}
+}
+
+func recursiveLeaves[T any](treePath Path, node *Node[T], ordered bool, yield func(Path, T) bool) bool {
 	if node.Map == nil {
 		return yield(slices.Clone(treePath), node.Value)
 	}
-	for key, subNode := range node.Map {
-		ok := recursiveLeaves(append(treePath, key), subNode, yield)
-		if !ok {
-			return false
+	if ordered {
+		// Extract keys and sort first.
+		for _, key := range xslices.SortedKeys(node.Map) {
+			subNode := node.Map[key]
+			ok := recursiveLeaves[T](append(treePath, key), subNode, ordered, yield)
+			if !ok {
+				return false
+			}
+		}
+	} else {
+		// Usual range over map, non-deterministic.
+		for key, subNode := range node.Map {
+			ok := recursiveLeaves(append(treePath, key), subNode, ordered, yield)
+			if !ok {
+				return false
+			}
 		}
 	}
 	return true
+}
+
+// ValuesAsList extracts the leaf values of Tree into a list.
+//
+// It's generated in alphabetical order -- see OrderedLeaves to see or generate the order.
+func ValuesAsList[T any](tree *Tree[T]) []T {
+	results := make([]T, 0, tree.NumLeaves())
+	for _, values := range tree.OrderedLeaves() {
+		results = append(results, values)
+	}
+	return results
+}
+
+// FromValuesAndTree creates a Tree[T1] with the given values, but borrowing the structure from the given tree (but
+// ignoring the tree's values).
+func FromValuesAndTree[T1, T2 any](values []T1, tree *Tree[T2]) *Tree[T1] {
+	numLeaves := tree.NumLeaves()
+	if len(values) != numLeaves {
+		exceptions.Panicf("%d values given, but the tree to be built has %d leaves.", len(values), numLeaves)
+	}
+	newTree := &Tree[T1]{Root: &Node[T1]{}}
+	var idx int
+	for treePath, _ := range tree.OrderedLeaves() {
+		newTree.Set(treePath, values[idx])
+		idx++
+	}
+	return newTree
 }
