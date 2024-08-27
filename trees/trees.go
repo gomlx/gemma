@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/gomlx/exceptions"
 	"github.com/gomlx/gomlx/types/xslices"
+	"github.com/pkg/errors"
 	"golang.org/x/exp/slices"
 	"iter"
 	"strings"
@@ -25,45 +26,84 @@ func (n *Node[T]) IsLeaf() bool { return n.Map == nil }
 //
 // T is the type of the leaf nodes.
 type Tree[T any] struct {
-	Root *Node[T]
+	Root *Node[T] // The root node is always a map.
 }
 
 // Path is usually used as the path from the root node.
 type Path []string
 
-func New[T any](root *Node[T]) *Tree[T] {
-	return &Tree[T]{Root: root}
+// New creates a new empty tree.
+func New[T any]() *Tree[T] {
+	return &Tree[T]{
+		Root: NewMapNode[T](),
+	}
 }
 
-func NewMap[T any]() *Node[T] {
+// NewMapNode creates a new node that is Map, empty.
+func NewMapNode[T any]() *Node[T] {
 	return &Node[T]{Map: make(map[string]*Node[T])}
 }
 
-func NewLeaf[T any](value T) *Node[T] {
+// NewLeafNode creates a new leaf node with the given value.
+func NewLeafNode[T any](value T) *Node[T] {
 	return &Node[T]{Value: value}
 }
 
+// DefaultTreePath is used whenever an empty treePath is given.
+var DefaultTreePath = []string{"#root"}
+
 // Set value in treePath, populating intermediary nodes where needed.
-func (tree *Tree[T]) Set(treePath Path, value T) {
+//
+// Empty values in treePath are not used.
+// An empty tree path is converted to DefaultTreePath (== []string{"#root"})
+//
+// It returns an error if one is trying to set the value to an existing non-leaf node: nodes can either
+// be a leaf or a Map (non-leaf), but not both.
+func (tree *Tree[T]) Set(treePath Path, value T) error {
 	node := tree.Root
-	for len(treePath) > 0 {
-		pathElement := treePath[0]
-		treePath = treePath[1:]
+	// Remove empty ("") path components -- clone the slice, not to modify caller's slice.
+	if slices.Index(treePath, "") > 0 {
+		treePath = slices.DeleteFunc(slices.Clone(treePath),
+			func(s string) bool {
+				return s == ""
+			})
+	}
+	remainingPath := treePath
+	if len(remainingPath) == 0 {
+		remainingPath = DefaultTreePath
+	}
+	pathCount := 0
+	for len(remainingPath) > 0 {
+		pathElement := remainingPath[0]
+		remainingPath = remainingPath[1:]
 		if pathElement == "" {
 			// Skip empty path components
 			continue
 		}
 		if node.IsLeaf() {
-			node.Map = make(map[string]*Node[T])
+			var t T
+			return errors.Errorf("trees.Tree[%T].Set(%q) trying to create a path using an existing leaf node (%q) as a non-leaf node",
+				t, treePath, treePath[:pathCount])
 		}
 		newNode := node.Map[pathElement]
 		if newNode == nil {
-			newNode = &Node[T]{}
+			if len(remainingPath) == 0 {
+				newNode = NewLeafNode[T](value)
+			} else {
+				newNode = NewMapNode[T]()
+			}
 			node.Map[pathElement] = newNode
 		}
 		node = newNode
+		pathCount++
+	}
+	if !node.IsLeaf() {
+		var t T
+		return errors.Errorf("trees.Tree[%T].Set(%q) trying to set the value to a non-leaf node -- each node can either be a leaf node, or be a structural map of the tree",
+			t, treePath)
 	}
 	node.Value = value
+	return nil
 }
 
 // String implements fmt.String
@@ -98,12 +138,13 @@ func nodeToString[T any](parts []string, name string, subTree *Node[T], indent i
 
 // Map converts a Tree[T1] to a Tree[T2] by calling mapFn at every element.
 func Map[T1, T2 any](tree1 *Tree[T1], mapFn func(Path, T1) T2) *Tree[T2] {
-	if tree1.Root.IsLeaf() {
-		return New(NewLeaf(mapFn(nil, tree1.Root.Value)))
-	}
-	tree2 := New(NewMap[T2]())
+	tree2 := New[T2]()
 	for p, t1 := range tree1.Leaves() {
-		tree2.Set(p, mapFn(p, t1))
+		err := tree2.Set(p, mapFn(p, t1))
+		if err != nil {
+			// Should never happen, since there can be no errors duplicating the structure of an existing valid tree.
+			panic(err)
+		}
 	}
 	return tree2
 }
@@ -136,7 +177,7 @@ func (tree *Tree[T]) OrderedLeaves() iter.Seq2[Path, T] {
 }
 
 func recursiveLeaves[T any](treePath Path, node *Node[T], ordered bool, yield func(Path, T) bool) bool {
-	if node.Map == nil {
+	if node.IsLeaf() {
 		return yield(slices.Clone(treePath), node.Value)
 	}
 	if ordered {
@@ -178,10 +219,14 @@ func FromValuesAndTree[T1, T2 any](values []T1, tree *Tree[T2]) *Tree[T1] {
 	if len(values) != numLeaves {
 		exceptions.Panicf("%d values given, but the tree to be built has %d leaves.", len(values), numLeaves)
 	}
-	newTree := &Tree[T1]{Root: &Node[T1]{}}
+	newTree := New[T1]()
 	var idx int
 	for treePath, _ := range tree.OrderedLeaves() {
-		newTree.Set(treePath, values[idx])
+		err := newTree.Set(treePath, values[idx])
+		if err != nil {
+			// Should never happen, since there can be no errors duplicating the structure of an existing valid tree.
+			panic(err)
+		}
 		idx++
 	}
 	return newTree
