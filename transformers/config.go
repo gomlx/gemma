@@ -3,6 +3,7 @@ package transformers
 import (
 	"github.com/gomlx/gemma/trees"
 	"github.com/gomlx/gomlx/types/tensors"
+	"github.com/gomlx/gopjrt/dtypes"
 	"github.com/pkg/errors"
 	"maps"
 	"strings"
@@ -58,6 +59,7 @@ const (
 // Config Gemma transformer model.
 type Config struct {
 	Type                                 GemmaType
+	DType                                dtypes.DType
 	NumLayers                            int
 	NumEmbed, EmbedDim                   int
 	NumHeads, HeadDim                    int
@@ -80,6 +82,16 @@ func NewConfigFromWeights(weights *trees.Tree[*tensors.Tensor]) (*Config, error)
 	c := &Config{
 		MaxCacheLength:        1024,
 		QueryPreAttentionNorm: QueryNormTypeByOneOverSqrtHeadDim,
+	}
+
+	for _, w := range weights.Leaves() {
+		if c.DType == dtypes.InvalidDType {
+			c.DType = w.DType()
+			continue
+		}
+		if c.DType != w.DType() {
+			return nil, errors.New("can't infer dtype, different parameters have different dtypes")
+		}
 	}
 
 	// Find number of layers:
@@ -121,5 +133,3 @@ func (c *Config) setGemma2_2B() {
 	c.AttentionLogitsSoftCap = 50.0
 	c.SlidingWindowSize = 4096
 }
-
-func (c *Config) InitCache() map

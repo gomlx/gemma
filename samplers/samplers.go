@@ -2,6 +2,8 @@
 package samplers
 
 import (
+	"github.com/gomlx/gemma/transformers"
+	"github.com/gomlx/gemma/trees"
 	"github.com/gomlx/gomlx/backends"
 	. "github.com/gomlx/gomlx/graph"
 	"github.com/gomlx/gomlx/ml/context"
@@ -29,7 +31,7 @@ type Vocabulary interface {
 type Sampler struct {
 	Backend backends.Backend
 	Vocab   Vocabulary
-	Weights any
+	Weights *trees.Tree[*tensors.Tensor]
 
 	// MaxGeneratedTokens default for Sampler.Sample.
 	MaxGeneratedTokens int
@@ -39,10 +41,13 @@ type Sampler struct {
 
 	// SampleStep graph computation.
 	SampleStep *context.Exec
+
+	// Config of the Gemma model, created from the weights.
+	Config *transformers.Config
 }
 
 // New creates a new sampler with the registered vocabulary and model.
-func New(backend backends.Backend, vocab Vocabulary, modelWeights any, maxGeneratedTokens int) *Sampler {
+func New(backend backends.Backend, vocab Vocabulary, modelWeights *trees.Tree[*tensors.Tensor], maxGeneratedTokens int) (*Sampler, error) {
 	s := &Sampler{
 		Backend:            backend,
 		Vocab:              vocab,
@@ -51,7 +56,12 @@ func New(backend backends.Backend, vocab Vocabulary, modelWeights any, maxGenera
 		Context:            context.New(),
 	}
 	s.SampleStep = context.NewExec(backend, s.Context, s.sampleStepGraphFn())
-	return s
+	var err error
+	s.Config, err = transformers.NewConfigFromWeights(modelWeights)
+	if err != nil {
+		return nil, err
+	}
+	return s, nil
 }
 
 // Sample the continuation from the given prompts.
@@ -165,6 +175,9 @@ type samplingState struct {
 
 	// Done is a vector of the inputs who are done with the generation: shaped bool[batch_size].
 	Done *tensors.Tensor
+
+	// Cache used during the sampling.
+	Cache *transformers.Cache
 }
 
 // initialState creates a tensor shaped int32[batchSize, totalLength+2] padded with the Vocab.PadId filled (left to right)
@@ -212,6 +225,8 @@ func (s *Sampler) initialState(promptIds [][]int, maxTokens int) (state sampling
 	})
 
 	state.Done = tensors.FromShape(shapes.Make(dtypes.Bool, batchSize))
+
+	state.Cache = transformers.NewCache(s.Config, batchSize)
 	return
 }
 

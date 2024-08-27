@@ -74,7 +74,7 @@ func fromJsonTreeMetaData(jsonTree any) (tree *trees.Tree[*Metadata], err error)
 		return
 	}
 	_ = mapAny
-	tree = trees.New(trees.NewMap[*Metadata]())
+	tree = trees.New[*Metadata]()
 	for key, value := range mapAny {
 		switch key {
 		case KeyUseZarr3:

@@ -39,7 +39,7 @@ func ReadConvertedWeights(checkpointDir string) (tree *trees.Tree[*tensors.Tenso
 			checkpointDir)
 		return
 	}
-	tree = trees.New(trees.NewMap[*tensors.Tensor]())
+	tree = trees.New[*tensors.Tensor]()
 	err = fs.WalkDir(os.DirFS(rawDir), ".", func(filePath string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return errors.Wrapf(err, "failed to traverse %q", rawDir)
