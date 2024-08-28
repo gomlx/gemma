@@ -2,6 +2,7 @@
 package samplers
 
 import (
+	"github.com/dustin/go-humanize"
 	"github.com/gomlx/gemma/transformers"
 	"github.com/gomlx/gemma/trees"
 	"github.com/gomlx/gomlx/backends"
@@ -11,7 +12,9 @@ import (
 	"github.com/gomlx/gomlx/types/tensors"
 	"github.com/gomlx/gomlx/types/xslices"
 	"github.com/gomlx/gopjrt/dtypes"
+	klog "k8s.io/klog/v2"
 	"slices"
+	"time"
 )
 
 type Vocabulary interface {
@@ -44,6 +47,10 @@ type Sampler struct {
 
 	// Config of the Gemma model, created from the weights.
 	Config *transformers.Config
+
+	// CacheTreeStructure holds the structure of the tree used for caching: the tree structure (paths) is stable
+	// across different calls to Sample.
+	CacheTreeStructure *trees.Tree[struct{}]
 }
 
 // New creates a new sampler with the registered vocabulary and model.
@@ -87,35 +94,57 @@ func (s *Sampler) sampleLoop(state samplingState) samplingState {
 		state.StepNum,
 		state.Done,
 	}
+	// * Append cache values.
+	cacheValues := trees.ValuesAsList(state.Cache.Data)
+	inputs = append(inputs, xslices.Map(cacheValues, func(t *tensors.Tensor) any { return t })...)
 	numMutableInputs := len(inputs)
+
 	// Append constant inputs.
+	start := time.Now()
 	inputs = append(inputs,
 		state.NumInputTokens,
 	)
+	var outputs []*tensors.Tensor
+	var execTime, inputsPrepTime time.Duration
+	var count int
 	for {
+		inputPrepStart := time.Now()
 		// We donate all the inputs, since they are all going to be updated (saves some GPU memory).
 		for ii := range numMutableInputs {
 			inputs[ii] = DonateTensorBuffer(inputs[ii].(*tensors.Tensor), s.Backend)
 		}
+		inputsPrepTime += time.Since(inputPrepStart)
 
 		// Execute a step.
-		outputs := s.SampleStep.Call(inputs...)
+		execStart := time.Now()
+		outputs = s.SampleStep.Call(inputs...)
+		execTime += time.Since(execStart)
+		count++
 
 		// Update states (the output has the same order as the input).
 		for ii := range numMutableInputs {
 			inputs[ii] = outputs[ii]
 		}
-		outputs = outputs[len(inputs):] // Separate the transient outputs.
+		extraOutputs := outputs[numMutableInputs:] // Separate the transient outputs.
+		done := tensors.ToScalar[bool](extraOutputs[0])
 
 		// End-of-sampling:
-		done := tensors.ToScalar[bool](outputs[0])
 		if done {
 			break
 		}
 	}
-	state.InputBuffer = inputs[0].(*tensors.Tensor)
-	state.Positions = inputs[2].(*tensors.Tensor)
-	state.StepNum = inputs[3].(*tensors.Tensor)
+	if klog.V(1).Enabled() {
+		elapsed := time.Since(start)
+		klog.Infof("Sample execution time (%d steps): %s", count, elapsed)
+		klog.Infof("> Graph execution time: %s", execTime)
+		klog.Infof("> Inputs preparation time: %s", inputsPrepTime)
+	}
+	state.InputBuffer = outputs[0]
+	state.Positions = outputs[1]
+	state.StepNum = outputs[2]
+	state.Done = outputs[3]
+	updatedCache := trees.FromValuesAndTree(outputs[4:4+s.CacheTreeStructure.NumLeaves()], s.CacheTreeStructure)
+	state.Cache.Data = updatedCache
 	return state
 }
 
@@ -126,10 +155,11 @@ func (s *Sampler) sampleStepGraphFn() func(*context.Context, []*Node) []*Node {
 		g := state[0].Graph() // Reference to the underlying graph, it could be from any of the inputs.
 		_ = ctx
 
-		idx := 0
+		// Extract state parts:
+		stateFieldsIdx := 0
 		nextState := func() *Node {
-			field := state[idx]
-			idx++
+			field := state[stateFieldsIdx]
+			stateFieldsIdx++
 			return field
 		}
 		// This order has to match the order fed in sampleLoop.
@@ -138,20 +168,25 @@ func (s *Sampler) sampleStepGraphFn() func(*context.Context, []*Node) []*Node {
 		positions := nextState()
 		stepNum := nextState()
 		done := nextState()
+		numCacheValues := s.CacheTreeStructure.NumLeaves()
+		cache := trees.FromValuesAndTree(state[stateFieldsIdx:stateFieldsIdx+numCacheValues], s.CacheTreeStructure)
+		stateFieldsIdx += numCacheValues
+
 		// - Constant fields.
 		numInputTokens := nextState()
 		_ = numInputTokens
 
 		stepNum = AddScalar(stepNum, 1)
 		maxSteps := inputBuffer.Shape().Dimensions[1] - 2
-		allDone := GreaterOrEqual(stepNum, Const(g, int32(maxSteps)))
-		return []*Node{
-			// Mutable fields update:
-			inputBuffer, positions, stepNum, done,
+		allDone := ConvertDType(ReduceAllMultiply(ConvertDType(done, dtypes.Int8)), dtypes.Bool)
+		allDone = Or(allDone, GreaterOrEqual(stepNum, Const(g, int32(maxSteps))))
 
-			// Other results
-			allDone,
-		}
+		// Outputs: updated mutable values first including cache):
+		outputs := []*Node{inputBuffer, positions, stepNum, done}
+		outputs = append(outputs, trees.ValuesAsList(cache)...)
+		// - Other results:
+		outputs = append(outputs, allDone)
+		return outputs
 	}
 }
 
@@ -226,7 +261,24 @@ func (s *Sampler) initialState(promptIds [][]int, maxTokens int) (state sampling
 
 	state.Done = tensors.FromShape(shapes.Make(dtypes.Bool, batchSize))
 
+	// Setup cache, and if not yet setup, configure cache structure.
+	var start time.Time
+	if klog.V(1).Enabled() {
+		start = time.Now()
+	}
 	state.Cache = transformers.NewCache(s.Config, batchSize)
+	if s.CacheTreeStructure == nil {
+		s.CacheTreeStructure = trees.Map(state.Cache.Data, func(_ trees.Path, _ *tensors.Tensor) (empty struct{}) { return })
+	}
+
+	if klog.V(1).Enabled() {
+		elapsed := time.Since(start)
+		var cacheMem uintptr
+		for _, t := range state.Cache.Data.Leaves() {
+			cacheMem += t.Memory()
+		}
+		klog.Infof("cache: elapsed %s, memory used %s\n", elapsed, humanize.Bytes(uint64(cacheMem)))
+	}
 	return
 }
 
