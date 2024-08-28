@@ -11,6 +11,7 @@ import (
 
 type Processor struct {
 	*esentencepiece.Processor
+	Info *esentencepiece.ModelInfo
 }
 
 func NewFromPath(vocabPath string) (*Processor, error) {
@@ -20,6 +21,7 @@ func NewFromPath(vocabPath string) (*Processor, error) {
 	}
 	return &Processor{
 		Processor: proc,
+		Info: proc.ModelInfo(),
 	}, nil
 }
 
@@ -37,3 +39,24 @@ func (p *Processor) EncodeAsIDs(text string) []int {
 func (p *Processor) DecodeIDs(ids []int) string {
 	return p.Processor.Decode(ids)
 }
+
+// BeginningOfSentenceID implements sampler.Vocabulary.
+func (p *Processor) BeginningOfSentenceID() int {
+	return p.Info.BeginningOfSentenceID
+}
+
+// EndOfSentenceID implements sampler.Vocabulary.
+func (p *Processor) EndOfSentenceID() int{
+	return p.Info.EndOfSentenceID
+}
+
+// UnknownID implements sampler.Vocabulary.
+func (p *Processor) UnknownID() int{
+	return p.Info.UnknownID
+}
+
+// PadID implements sampler.Vocabulary.
+func (p *Processor) PadID() int{
+	return p.Info.PadID
+}
+
