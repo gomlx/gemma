@@ -176,10 +176,13 @@ func (s *Sampler) sampleStepGraphFn() func(*context.Context, []*Node) []*Node {
 		numInputTokens := nextState()
 		_ = numInputTokens
 
+		// Prepare next step: are we done ?
 		stepNum = AddScalar(stepNum, 1)
 		maxSteps := inputBuffer.Shape().Dimensions[1] - 2
-		allDone := ConvertDType(ReduceAllMultiply(ConvertDType(done, dtypes.Int8)), dtypes.Bool)
-		allDone = Or(allDone, GreaterOrEqual(stepNum, Const(g, int32(maxSteps))))
+		allDone := Or(
+			LogicalAll(done),
+			GreaterOrEqual(stepNum, Const(g, int32(maxSteps))),
+		)
 
 		// Outputs: updated mutable values first including cache):
 		outputs := []*Node{inputBuffer, positions, stepNum, done}
