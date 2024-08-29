@@ -180,7 +180,12 @@ func (s *Sampler) sampleStepGraphFn() func(*context.Context, []*Node) []*Node {
 		currentTokens.AssertDims(batchSize, 1)
 		currentPositions := DynamicSlice(positions, []*Node{zeroIdx, stepNum}, []int{batchSize, 1})
 		currentPositions.AssertDims(batchSize, 1)
-		var attentionMask *Node // ?
+
+		// Attention to all positions < current step number (stepNum).
+		// Notice that the cache rotates, so once stepNum > Config.MaxCacheLength, the mask will be
+		// true everywhere.
+		attentionMask := Iota(g, shapes.Make(dtypes.Int32, batchSize, 1, s.Config.MaxCacheLength), 1)
+		attentionMask = LessOrEqual(attentionMask, stepNum)
 
 		logits := transformers.GemmaWithCache(ctx.In("model"), s.Weights,
 			currentTokens, currentPositions, cache, attentionMask)
