@@ -90,7 +90,6 @@ func (s *Sampler) sampleLoop(state samplingState) samplingState {
 	// * If you change this order, change the parsing order in sampleStepGraphFn below.
 	inputs := []any{
 		state.InputBuffer,
-		state.Positions,
 		state.StepNum,
 		state.Done,
 	}
@@ -102,7 +101,7 @@ func (s *Sampler) sampleLoop(state samplingState) samplingState {
 	// Append constant inputs.
 	start := time.Now()
 	inputs = append(inputs,
-		state.NumInputTokens,
+		state.Positions,
 	)
 	var outputs []*tensors.Tensor
 	var execTime, inputsPrepTime time.Duration
@@ -165,7 +164,6 @@ func (s *Sampler) sampleStepGraphFn() func(*context.Context, []*Node) []*Node {
 		// This order has to match the order fed in sampleLoop.
 		// - Mutable fields, to be updated.
 		inputBuffer := nextState()
-		positions := nextState()
 		stepNum := nextState()
 		done := nextState()
 		numCacheValues := s.CacheTreeStructure.NumLeaves()
@@ -173,11 +171,39 @@ func (s *Sampler) sampleStepGraphFn() func(*context.Context, []*Node) []*Node {
 		stateFieldsIdx += numCacheValues
 
 		// - Constant fields.
-		numInputTokens := nextState()
-		_ = numInputTokens
+		positions := nextState()
+
+		// Take the current step token for all examples of the batch.
+		batchSize := inputBuffer.Shape().Dimensions[0]
+		zeroIdx := ScalarZero(g, dtypes.Int32)
+		currentTokens := DynamicSlice(inputBuffer, []*Node{zeroIdx, stepNum}, []int{batchSize, 1})
+		currentTokens.AssertDims(batchSize, 1)
+		currentPositions := DynamicSlice(positions, []*Node{zeroIdx, stepNum}, []int{batchSize, 1})
+		currentPositions.AssertDims(batchSize, 1)
+		var attentionMask *Node // ?
+
+		logits := transformers.GemmaWithCache(ctx.In("model"), s.Weights,
+			currentTokens, currentPositions, cache, attentionMask)
+
+		nextTokenNum := OnePlus(stepNum)
+		nextPredictedTokens := ExpandDims(ArgMax(logits, -1), -1)
+		nextPredictedTokens.AssertDims(batchSize, 1)
+		nextTokenStartIdx := []*Node{zeroIdx, nextTokenNum}
+		nextTokens := DynamicSlice(inputBuffer, nextTokenStartIdx, []int{batchSize, 1})
+		nextTokens.AssertDims(batchSize, 1)
+		nextTokens = Where(
+			Or(
+				Equal(nextTokens, Const(g, int32(s.Vocab.PadID()))),
+				ExpandDims(done, -1),
+			),
+			nextPredictedTokens,
+			nextTokens,
+		)
+		inputBuffer = DynamicUpdateSlice(inputBuffer, nextTokens, nextTokenStartIdx)
+		done = Or(done, Equal(nextTokens, Const(g, int32(s.Vocab.EndOfSentenceID()))))
 
 		// Prepare next step: are we done ?
-		stepNum = AddScalar(stepNum, 1)
+		stepNum = nextTokenNum
 		maxSteps := inputBuffer.Shape().Dimensions[1] - 2
 		allDone := Or(
 			LogicalAll(done),
@@ -185,7 +211,7 @@ func (s *Sampler) sampleStepGraphFn() func(*context.Context, []*Node) []*Node {
 		)
 
 		// Outputs: updated mutable values first including cache):
-		outputs := []*Node{inputBuffer, positions, stepNum, done}
+		outputs := []*Node{inputBuffer, stepNum, done}
 		outputs = append(outputs, trees.ValuesAsList(cache)...)
 		// - Other results:
 		outputs = append(outputs, allDone)
@@ -202,7 +228,7 @@ type samplingState struct {
 	// an <eos> (end-of-sentence).
 	InputBuffer *tensors.Tensor
 
-	// NumInputTokens is the number of tokens on the original input: shaped int32[batch_size].
+	// NumInputTokens is the number of tokens on the original input per example: shaped int32[batch_size].
 	NumInputTokens *tensors.Tensor
 
 	// Positions for each token, see transformers.BuildPositionsFromMask
@@ -229,10 +255,10 @@ func (s *Sampler) initialState(promptIds [][]int, maxTokens int) (state sampling
 	state.BatchSize = len(promptIds)
 	batchSize := state.BatchSize
 
-	lengths := xslices.Map(promptIds, func(seq []int) int32 { return int32(len(seq)) })
-	state.NumInputTokens = tensors.FromValue(lengths) // Shape [batchSize]
+	lengths := xslices.Map(promptIds, func(seq []int) int32 { return int32(len(seq)) + 1 }) // +1 for <bos> (beginning-of-sentence) token.
+	state.NumInputTokens = tensors.FromValue(lengths)                                       // Shape [batchSize]
 	maxInputLength := int(slices.Max(lengths))
-	state.TotalLength = maxInputLength + maxTokens + 2 // +1 for <bos> (beginning-of-sentence token) and +1 for <eos>.
+	state.TotalLength = maxInputLength + maxTokens + 1 // +1 for <eos>.
 	totalLength := state.TotalLength
 
 	state.StepNum = tensors.FromScalar(int32(0))
