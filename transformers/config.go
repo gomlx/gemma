@@ -2,6 +2,7 @@ package transformers
 
 import (
 	"github.com/gomlx/gemma/trees"
+	"github.com/gomlx/gomlx/ml/context"
 	"github.com/gomlx/gomlx/types/tensors"
 	"github.com/gomlx/gopjrt/dtypes"
 	"github.com/pkg/errors"
@@ -60,7 +61,6 @@ const VocabularySize = 256128 // Should come with the vocabulary, but it also de
 
 // Config Gemma transformer model.
 type Config struct {
-	Weights                              *trees.Tree[*tensors.Tensor]
 	Type                                 GemmaType
 	DType                                dtypes.DType
 	VocabularySize                       int
@@ -85,7 +85,6 @@ type Config struct {
 func NewConfigFromWeights(weights *trees.Tree[*tensors.Tensor]) (*Config, error) {
 	c := &Config{
 		VocabularySize:        VocabularySize,
-		Weights:               weights,
 		MaxCacheLength:        1024,
 		QueryPreAttentionNorm: QueryNormTypeByOneOverSqrtHeadDim,
 	}
@@ -138,4 +137,23 @@ func (c *Config) setGemma2_2B() {
 	c.QueryPreAttentionNorm = QueryNormTypeByOneOverSqrtHeadDim
 	c.AttentionLogitsSoftCap = 50.0
 	c.SlidingWindowSize = 4096
+}
+
+// UploadWeights creates variables corresponding to the weights.
+// It returns the ctx given, with the variables set.
+//
+// It's tightly coupled with the model building functions in this package.
+// Meaning the modeling must match the naming here.
+func (c *Config) UploadWeights(ctx *context.Context, weights *trees.Tree[*tensors.Tensor]) *context.Context {
+	weights = weights.Map["transformer"]
+	for treePath, tensor := range weights.Leaves() {
+		scopedCtx := ctx
+		scopeParts := treePath[:len(treePath)-1]
+		for _, p := range scopeParts {
+			scopedCtx = scopedCtx.In(p)
+		}
+		varName := treePath[len(treePath)-1]
+		_ = scopedCtx.VariableWithValue(varName, tensor)
+	}
+	return ctx
 }

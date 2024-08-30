@@ -67,6 +67,7 @@ func New(backend backends.Backend, vocab Vocabulary, modelWeights *trees.Tree[*t
 	if err != nil {
 		return nil, err
 	}
+	s.Config.UploadWeights(s.Context.In("model"), modelWeights)
 	s.SampleStep = context.NewExec(backend, s.Context, s.sampleStepGraphFn())
 	return s, nil
 }
