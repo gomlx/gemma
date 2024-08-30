@@ -70,6 +70,7 @@ type Config struct {
 	HiddenDim                            int
 	NumKVHeads                           int
 	FinalLogitSoftCap                    float64
+	UseQKV, UseGroupQueryAttention       bool
 	UsePostAttentionNorm, UsePostFFWNorm bool
 
 	AttentionTypes        []AttentionType
@@ -116,6 +117,9 @@ func NewConfigFromWeights(weights *trees.Tree[*tensors.Tensor]) (*Config, error)
 	default:
 		return nil, errors.Errorf("unknown or not implemented for Gemma model type %q", c.Type)
 	}
+
+	c.UseQKV = c.NumKVHeads == c.NumHeads
+	c.UseGroupQueryAttention = (c.NumKVHeads != c.NumHeads) && c.NumKVHeads > 1
 	return c, nil
 }
 
