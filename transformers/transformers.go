@@ -25,10 +25,6 @@ func GemmaWithCache(ctx *context.Context, config *Config,
 
 	// Embed.
 	x := EmbedTokens(ctx.In("embedder"), config, currentTokens)
-	x.SetLogged("embedded")
-	if true {
-		return nil
-	}
 
 	// Run through numLayers blocks.
 	for blockIdx := range config.NumLayers {
@@ -44,24 +40,39 @@ func GemmaWithCache(ctx *context.Context, config *Config,
 	return nil
 }
 
+func debugContext(ctx *context.Context) {
+	fmt.Printf("ctx: scope=%q\n", ctx.Scope())
+	ctx.EnumerateVariablesInScope(func(v *context.Variable) {
+		fmt.Printf("\t> %q\n", v.ScopeAndName())
+	})
+}
+
 // EmbedTokens using weights in Config.
+// Input: currentTokens: [batchSize, sequenceSize]
+// Output: embeddings: [batchSize, sequenceSize, config.EmbedDim]
 func EmbedTokens(ctx *context.Context, config *Config, currentTokens *Node) *Node {
 	g := currentTokens.Graph()
-	embedTableVar := ctx.VariableWithShape("input_embeddings", shapes.Make(dtypes.BFloat16, config.VocabularySize, config.EmbedDim))
-	embeddings := Gather(embedTableVar.ValueGraph(g), currentTokens)
+	embedTableVar := ctx.VariableWithShape("input_embedding", shapes.Make(dtypes.BFloat16, config.VocabularySize, config.EmbedDim))
+	embeddings := Gather(embedTableVar.ValueGraph(g), ExpandDims(currentTokens, -1))
 	embeddings = Mul(embeddings, Sqrt(Scalar(g, embeddings.DType(), float64(config.EmbedDim))))
 	return embeddings
 }
 
-// Block implements one transformer block for the Gemma model.
+// Block implements one transformer block for the Gemma model. x is shaped [batchSize, sequenceSize], and if
+// using cache (cache != nil), x will only contain the current token, shaped [batchSize, 1].
 //
 // If cache is given, attentionMask is relative to the cache. Otherwise, attentionMask is relative to the operand x.
 func Block(ctx *context.Context, config *Config, x, positions *Node, cache *trees.Tree[*Node], attentionMask *Node) *Node {
+	x.SetLogged("block input")
 	normalizedX := RMSNorm(ctx.In("pre_attention_norm"), x)
+	normalizedX.SetLogged("Block::pre_attention_norm")
 
 	// Attention
-	//attentionOut := Attention(ctx, config, normalizedX, positions, cache, attentionMask)
-	attentionOut := normalizedX
+	attentionOut := Attention(ctx.In("attn"), config, normalizedX, positions, cache, attentionMask)
+	if true {
+		return nil
+	}
+	attentionOut.SetLogged("Block::attentionOut")
 	if config.UsePostAttentionNorm {
 		attentionOut = RMSNorm(ctx.In("post_attention_norm"), attentionOut)
 	}
