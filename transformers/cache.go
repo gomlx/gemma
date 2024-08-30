@@ -30,7 +30,7 @@ type Cache struct {
 	Data *trees.Tree[*tensors.Tensor]
 }
 
-func NewCache(config *Config, batchSize int) *Cache {
+func NewCache(config *Config, batchSize int) (*Cache, error) {
 	c := &Cache{
 		Config:    config,
 		BatchSize: batchSize,
@@ -40,8 +40,11 @@ func NewCache(config *Config, batchSize int) *Cache {
 
 	for layerIdx := range config.NumLayers {
 		treePath := []string{fmt.Sprintf("layer_%d", layerIdx)}
-		createAttentionCache(c.Data, treePath, config.DType, batchSize, config.MaxCacheLength,
+		err := createAttentionCache(c.Data, treePath, config.DType, batchSize, config.MaxCacheLength,
 			config.NumKVHeads, config.HeadDim)
+		if err != nil {
+			return nil, err
+		}
 	}
-	return c
+	return c, nil
 }
