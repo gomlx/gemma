@@ -41,6 +41,46 @@ func NewLeaf[T any](value T) *Tree[T] {
 // DefaultTreePath is used whenever an empty treePath is given.
 var DefaultTreePath = []string{"#root"}
 
+// Get value in treePath.
+// It returns an error if such a leaf node doesn't exist.
+//
+// Empty values in treePath are not used.
+func (tree *Tree[T]) Get(treePath Path) (value T, err error) {
+	// Remove empty ("") path components -- clone the slice, not to modify caller's slice.
+	if slices.Index(treePath, "") > 0 {
+		treePath = slices.DeleteFunc(slices.Clone(treePath),
+			func(s string) bool {
+				return s == ""
+			})
+	}
+	remainingPath := treePath
+	pathCount := 0
+	for len(remainingPath) > 0 {
+		if tree == nil {
+			err = errors.Errorf("trees.Tree[%T].Get(%q) can't get to sub-path %q, tree ends in a nil node, can't go forward",
+				value, treePath, treePath[:pathCount+1])
+		}
+		if tree.IsLeaf() {
+			err = errors.Errorf("trees.Tree[%T].Get(%q) the sub-path %q ends on a leaf-node, can't go forward",
+				value, treePath, treePath[:pathCount+1])
+			return
+		}
+		tree = tree.Map[remainingPath[0]]
+		remainingPath = remainingPath[1:]
+		pathCount++
+	}
+	if tree == nil {
+		err = errors.Errorf("trees.Tree[%T].Get(%q) can't get to sub-path %q, tree ends in a nil node, can't go forward",
+			value, treePath, treePath[:pathCount+1])
+	}
+	if !tree.IsLeaf() {
+		err = errors.Errorf("trees.Tree[%T].Get(%q) is not a leaf-node!?", value, treePath)
+		return
+	}
+	value = tree.Value
+	return
+}
+
 // Set value in treePath, populating intermediary nodes where needed.
 //
 // Empty values in treePath are not used.
