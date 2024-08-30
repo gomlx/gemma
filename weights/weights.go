@@ -2,6 +2,7 @@
 package weights
 
 import (
+	"github.com/dustin/go-humanize"
 	"github.com/gomlx/gemma/trees"
 	"github.com/gomlx/gomlx/ml/data"
 	"github.com/gomlx/gomlx/types/shapes"
@@ -11,6 +12,7 @@ import (
 	"github.com/janpfeifer/must"
 	"github.com/pkg/errors"
 	"github.com/vmihailenco/msgpack"
+	"io"
 	"io/fs"
 	"os"
 	"path"
@@ -51,8 +53,11 @@ func ReadConvertedWeights(checkpointDir string) (tree *trees.Tree[*tensors.Tenso
 		if ext != ".raw" {
 			return nil
 		}
-		base := path.Join(rawDir, strings.TrimSuffix(filePath, ext))
-		shapeFilePath := base + ".shape"
+
+		// Here we have teh pair of files ".shape" and ".raw":
+		base := strings.TrimSuffix(filePath, ext)
+		basePath := path.Join(rawDir, base)
+		shapeFilePath := basePath + ".shape"
 		if !data.FileExists(shapeFilePath) {
 			return nil
 		}
@@ -73,11 +78,11 @@ func ReadConvertedWeights(checkpointDir string) (tree *trees.Tree[*tensors.Tenso
 			return
 		})
 		if err != nil {
-			return errors.Wrapf(err, "failed to convert %q to a dimension, read from %q", shapeBytes, base+".shape")
+			return errors.Wrapf(err, "failed to convert %q to a dimension, read from %q", shapeBytes, basePath+".shape")
 		}
 		shape := shapes.Make(dtype, shapeDims...)
 
-		rawFilePath := base + ".raw"
+		rawFilePath := basePath + ".raw"
 		info, err := entry.Info()
 		if err != nil {
 			return errors.Wrapf(err, "failed to get info from %q", rawFilePath)
@@ -87,6 +92,9 @@ func ReadConvertedWeights(checkpointDir string) (tree *trees.Tree[*tensors.Tenso
 				rawFilePath, info.Size(), shape, shapeFilePath, shape.Memory())
 		}
 
+		treePath := strings.Split(base, "/")
+		//fmt.Printf("%q -> %s\n", treePath, shape)
+
 		tensor := tensors.FromShape(shape)
 		f, err := os.Open(rawFilePath)
 		if err != nil {
@@ -94,18 +102,19 @@ func ReadConvertedWeights(checkpointDir string) (tree *trees.Tree[*tensors.Tenso
 		}
 		var n int
 		tensor.MutableBytes(func(data []byte) {
-			n, err = f.Read(data)
+			n, err = io.ReadFull(f, data)
 		})
 		_ = f.Close()
 		if err != nil {
 			return errors.Wrapf(err, "failed to read raw data from %q", rawFilePath)
 		}
 		if n != int(shape.Memory()) {
-			return errors.Wrapf(err, "read %d bytes from %q, expected %d", n, rawFilePath, shape.Memory())
+			return errors.Errorf("read %d bytes from %q, expected %d", n, rawFilePath, shape.Memory())
 		}
-		treePath := strings.Split(filePath, "/")
-		treePath = treePath[:len(treePath)-1]
-		tree.Set(treePath, tensor)
+		err = tree.Set(treePath, tensor)
+		if err != nil {
+			return errors.WithMessagef(err, "failed to set variable with %s", humanize.Bytes(uint64(n)))
+		}
 		return nil
 	})
 	if err != nil {
