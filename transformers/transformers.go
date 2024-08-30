@@ -9,7 +9,6 @@ import (
 	"github.com/gomlx/gomlx/ml/context"
 	"github.com/gomlx/gomlx/types/shapes"
 	"github.com/gomlx/gopjrt/dtypes"
-	"github.com/pkg/errors"
 )
 
 // GemmaWithCache creates a forward path on a Gemma model for one decoding step,
@@ -23,22 +22,20 @@ import (
 // of the prediction of the next token.
 func GemmaWithCache(ctx *context.Context, config *Config,
 	currentTokens, currentPositions *Node, cache *trees.Tree[*Node], cacheAttentionMask *Node) *Node {
-	layerIdx := -1 // One before next.
-	nextLayerIdx := func() string {
-		layerIdx++
-		return fmt.Sprintf("%03d_", layerIdx)
-	}
 
 	// Embed.
-	x := EmbedTokens(ctx.In(nextLayerIdx()+"_embedder"), config, currentTokens)
+	x := EmbedTokens(ctx.In("embedder"), config, currentTokens)
+	x.SetLogged("embedded")
+	if true {
+		return nil
+	}
 
 	// Run through numLayers blocks.
 	for blockIdx := range config.NumLayers {
 		blockName := fmt.Sprintf("layer_%d", blockIdx)
-		blockCtx := ctx.In(nextLayerIdx() + blockName)
+		blockCtx := ctx.In(blockName)
 		blockCache := cache.Map[blockName]
-		x = Block(blockCtx, config, blockName, x, currentPositions, blockCache, cacheAttentionMask)
-		x.SetLogged(blockName)
+		x = Block(blockCtx, config, x, currentPositions, blockCache, cacheAttentionMask)
 		if true {
 			break
 		}
@@ -50,28 +47,34 @@ func GemmaWithCache(ctx *context.Context, config *Config,
 // EmbedTokens using weights in Config.
 func EmbedTokens(ctx *context.Context, config *Config, currentTokens *Node) *Node {
 	g := currentTokens.Graph()
-	treePath := []string{"transformer", "embedder", "input_embedding"}
-	var embedTableVar *context.Variable
-	if config.Weights != nil {
-		// Initialize variables from config weights:
-		embedTableT, err := config.Weights.Get(treePath)
-		if err != nil {
-			panic(errors.Wrapf(err, "tranformer model missing embedding table weights in path %q", treePath))
-		}
-		embedTableVar = ctx.VariableWithValue("embeddings", embedTableT)
-	} else {
-		// Default variable initialization (likely read from checkpoint)
-		embedTableVar = ctx.VariableWithShape("embeddings", shapes.Make(dtypes.BFloat16, config.VocabularySize, config.EmbedDim))
-	}
-	embedTable := embedTableVar.ValueGraph(g)
-	embeddings := Gather(embedTable, currentTokens)
+	embedTableVar := ctx.VariableWithShape("input_embeddings", shapes.Make(dtypes.BFloat16, config.VocabularySize, config.EmbedDim))
+	embeddings := Gather(embedTableVar.ValueGraph(g), currentTokens)
 	embeddings = Mul(embeddings, Sqrt(Scalar(g, embeddings.DType(), float64(config.EmbedDim))))
 	return embeddings
 }
 
 // Block implements one transformer block for the Gemma model.
-func Block(ctx *context.Context, config *Config, blockName string, x, positions *Node, cache *trees.Tree[*Node], cacheAttentionMask *Node) *Node {
-	blockWeights := config.Weights.Map["transformer"].Map[blockName]
-	_ = blockWeights
-	return x
+//
+// If cache is given, attentionMask is relative to the cache. Otherwise, attentionMask is relative to the operand x.
+func Block(ctx *context.Context, config *Config, x, positions *Node, cache *trees.Tree[*Node], attentionMask *Node) *Node {
+	normalizedX := RMSNorm(ctx.In("pre_attention_norm"), x)
+
+	// Attention
+	//attentionOut := Attention(ctx, config, normalizedX, positions, cache, attentionMask)
+	attentionOut := normalizedX
+	if config.UsePostAttentionNorm {
+		attentionOut = RMSNorm(ctx.In("post_attention_norm"), attentionOut)
+	}
+
+	// Residual (or skip) connection.
+	attentionOut = Add(attentionOut, x)
+
+	// One feed-forward ("ffw") layer.
+	output := RMSNorm(ctx.In("pre_ffw_norm"), attentionOut)
+
+	//...ffw
+	if config.UsePostFFWNorm {
+		output = RMSNorm(ctx.In("post_ffw_norm"), output)
+	}
+	return output
 }
