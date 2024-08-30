@@ -10,24 +10,18 @@ import (
 	"strings"
 )
 
-// Node is either a Value or a Map of its children -- but not both.
-type Node[T any] struct {
+// Tree represent both a root of a tree, and a tree node.
+//
+// It can either be a Value or a Map of its children -- but not both.
+type Tree[T any] struct {
 	// Value is set for leaf nodes only.
 	Value T
 
 	// Map is set for non-leaf nodes (and nil in leaf nodes).
-	Map map[string]*Node[T]
+	Map map[string]*Tree[T]
 }
 
-func (n *Node[T]) IsLeaf() bool { return n.Map == nil }
-
-// Tree holds the root node for a Tree-like structure, as parallel to the PyTree structure.
-// It also provides several convenience methods of access.
-//
-// T is the type of the leaf nodes.
-type Tree[T any] struct {
-	Root *Node[T] // The root node is always a map.
-}
+func (n *Tree[T]) IsLeaf() bool { return n.Map == nil }
 
 // Path is usually used as the path from the root node.
 type Path []string
@@ -35,18 +29,13 @@ type Path []string
 // New creates a new empty tree.
 func New[T any]() *Tree[T] {
 	return &Tree[T]{
-		Root: NewMapNode[T](),
+		Map: make(map[string]*Tree[T]),
 	}
 }
 
-// NewMapNode creates a new node that is Map, empty.
-func NewMapNode[T any]() *Node[T] {
-	return &Node[T]{Map: make(map[string]*Node[T])}
-}
-
-// NewLeafNode creates a new leaf node with the given value.
-func NewLeafNode[T any](value T) *Node[T] {
-	return &Node[T]{Value: value}
+// NewLeaf creates a new leaf node with the given value.
+func NewLeaf[T any](value T) *Tree[T] {
+	return &Tree[T]{Value: value}
 }
 
 // DefaultTreePath is used whenever an empty treePath is given.
@@ -55,12 +44,10 @@ var DefaultTreePath = []string{"#root"}
 // Set value in treePath, populating intermediary nodes where needed.
 //
 // Empty values in treePath are not used.
-// An empty tree path is converted to DefaultTreePath (== []string{"#root"})
 //
 // It returns an error if one is trying to set the value to an existing non-leaf node: nodes can either
 // be a leaf or a Map (non-leaf), but not both.
 func (tree *Tree[T]) Set(treePath Path, value T) error {
-	node := tree.Root
 	// Remove empty ("") path components -- clone the slice, not to modify caller's slice.
 	if slices.Index(treePath, "") > 0 {
 		treePath = slices.DeleteFunc(slices.Clone(treePath),
@@ -69,17 +56,11 @@ func (tree *Tree[T]) Set(treePath Path, value T) error {
 			})
 	}
 	remainingPath := treePath
-	if len(remainingPath) == 0 {
-		remainingPath = DefaultTreePath
-	}
 	pathCount := 0
+	node := tree
 	for len(remainingPath) > 0 {
 		pathElement := remainingPath[0]
 		remainingPath = remainingPath[1:]
-		if pathElement == "" {
-			// Skip empty path components
-			continue
-		}
 		if node.IsLeaf() {
 			var t T
 			return errors.Errorf("trees.Tree[%T].Set(%q) trying to create a path using an existing leaf node (%q) as a non-leaf node",
@@ -88,9 +69,9 @@ func (tree *Tree[T]) Set(treePath Path, value T) error {
 		newNode := node.Map[pathElement]
 		if newNode == nil {
 			if len(remainingPath) == 0 {
-				newNode = NewLeafNode[T](value)
+				newNode = NewLeaf[T](value)
 			} else {
-				newNode = NewMapNode[T]()
+				newNode = New[T]()
 			}
 			node.Map[pathElement] = newNode
 		}
@@ -109,11 +90,11 @@ func (tree *Tree[T]) Set(treePath Path, value T) error {
 // String implements fmt.String
 func (tree *Tree[T]) String() string {
 	var parts []string
-	parts = nodeToString(parts, "/", tree.Root, 0)
+	parts = nodeToString(parts, "/", tree, 0)
 	return strings.Join(parts, "\n") + "\n"
 }
 
-func nodeToString[T any](parts []string, name string, subTree *Node[T], indent int) []string {
+func nodeToString[T any](parts []string, name string, subTree *Tree[T], indent int) []string {
 	indentSpaces := strings.Repeat("  ", indent)
 	indent++
 	if len(subTree.Map) == 0 {
@@ -138,6 +119,11 @@ func nodeToString[T any](parts []string, name string, subTree *Node[T], indent i
 
 // Map converts a Tree[T1] to a Tree[T2] by calling mapFn at every element.
 func Map[T1, T2 any](tree1 *Tree[T1], mapFn func(Path, T1) T2) *Tree[T2] {
+	if tree1.IsLeaf() {
+		// Input tree1 is just a leaf node:
+		return NewLeaf[T2](mapFn(nil, tree1.Value))
+	}
+
 	tree2 := New[T2]()
 	for p, t1 := range tree1.Leaves() {
 		err := tree2.Set(p, mapFn(p, t1))
@@ -153,7 +139,7 @@ func Map[T1, T2 any](tree1 *Tree[T1], mapFn func(Path, T1) T2) *Tree[T2] {
 // The key is a Path, and value is T.
 func (tree *Tree[T]) Leaves() iter.Seq2[Path, T] {
 	return func(yield func(Path, T) bool) {
-		recursiveLeaves(nil, tree.Root, false, yield)
+		recursiveLeaves(nil, tree, false, yield)
 	}
 }
 
@@ -172,11 +158,11 @@ func (tree *Tree[T]) NumLeaves() int {
 // The key is a Path, and value is T.
 func (tree *Tree[T]) OrderedLeaves() iter.Seq2[Path, T] {
 	return func(yield func(Path, T) bool) {
-		recursiveLeaves(nil, tree.Root, true, yield)
+		recursiveLeaves(nil, tree, true, yield)
 	}
 }
 
-func recursiveLeaves[T any](treePath Path, node *Node[T], ordered bool, yield func(Path, T) bool) bool {
+func recursiveLeaves[T any](treePath Path, node *Tree[T], ordered bool, yield func(Path, T) bool) bool {
 	if node.IsLeaf() {
 		return yield(slices.Clone(treePath), node.Value)
 	}

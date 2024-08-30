@@ -38,9 +38,9 @@ func TestNewAndSet(t *testing.T) {
 	tree := createTestTree(t)
 	fmt.Printf("Tree:\n%v\n", tree)
 
-	require.Equal(t, 1, tree.Root.Map["a"].Value)
-	require.Equal(t, 2, tree.Root.Map["b"].Map["x"].Value)
-	require.Equal(t, 3, tree.Root.Map["b"].Map["y"].Value)
+	require.Equal(t, 1, tree.Map["a"].Value)
+	require.Equal(t, 2, tree.Map["b"].Map["x"].Value)
+	require.Equal(t, 3, tree.Map["b"].Map["y"].Value)
 
 	err := tree.Set([]string{"b"}, 4)
 	fmt.Printf("\texpected error trying to set non-leaf node: %v\n", err)
@@ -49,6 +49,11 @@ func TestNewAndSet(t *testing.T) {
 	err = tree.Set([]string{"b", "x", "0"}, 5)
 	fmt.Printf("\texpected error trying to use leaf node as structure: %v\n", err)
 	require.ErrorContains(t, err, "trying to create a path using an existing leaf node")
+
+	tree2 := NewLeaf(float32(7))
+	fmt.Printf("Tree:\n%v\n", tree2)
+	require.NoError(t, tree2.Set(nil, float32(11)))
+	require.Equal(t, float32(11), tree2.Value)
 }
 
 func TestOrderedLeaves(t *testing.T) {
@@ -71,12 +76,23 @@ func TestMap(t *testing.T) {
 		{Path{"b", "x"}, 2},
 		{Path{"b", "y"}, 3},
 	})
+
+	tree2 := NewLeaf(float32(7))
+	fmt.Printf("Tree:\n%v\n", tree2)
+	tree2Int := Map(tree2, func(_ Path, v float32) int { return int(v) })
+	verifyTreeValues(t, tree2Int, []expectedTreeValueType[int]{
+		{nil, 7},
+	})
 }
 
 func TestValuesAsList(t *testing.T) {
 	tree := createTestTree(t)
 	fmt.Printf("Tree:\n%v\n", tree)
 	require.Equal(t, []int{1, 2, 3}, ValuesAsList(tree))
+
+	tree2 := NewLeaf(float32(7))
+	fmt.Printf("Tree:\n%v\n", tree2)
+	require.Equal(t, []float32{7}, ValuesAsList(tree2))
 }
 
 func TestFromValuesAndTree(t *testing.T) {
