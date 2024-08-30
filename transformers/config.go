@@ -58,6 +58,7 @@ const (
 
 // Config Gemma transformer model.
 type Config struct {
+	Weights                              *trees.Tree[*tensors.Tensor]
 	Type                                 GemmaType
 	DType                                dtypes.DType
 	NumLayers                            int
@@ -80,6 +81,7 @@ type Config struct {
 // NewConfigFromWeights creates a transformers config model, based on the structure of the loaded model weights.
 func NewConfigFromWeights(weights *trees.Tree[*tensors.Tensor]) (*Config, error) {
 	c := &Config{
+		Weights:               weights,
 		MaxCacheLength:        1024,
 		QueryPreAttentionNorm: QueryNormTypeByOneOverSqrtHeadDim,
 	}
@@ -95,7 +97,7 @@ func NewConfigFromWeights(weights *trees.Tree[*tensors.Tensor]) (*Config, error)
 	}
 
 	// Find number of layers:
-	for key := range maps.Keys(weights.Root.Map["transformer"].Map) {
+	for key := range maps.Keys(weights.Map["transformer"].Map) {
 		if strings.Index(key, "layer") != -1 {
 			c.NumLayers++
 		}
