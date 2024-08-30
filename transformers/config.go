@@ -56,11 +56,14 @@ const (
 	QueryNormTypeByOneOverSqrtEmbedDimDivNumHeads
 )
 
+const VocabularySize = 256128 // Should come with the vocabulary, but it also defines the shape of the embedding table.
+
 // Config Gemma transformer model.
 type Config struct {
 	Weights                              *trees.Tree[*tensors.Tensor]
 	Type                                 GemmaType
 	DType                                dtypes.DType
+	VocabularySize                       int
 	NumLayers                            int
 	NumEmbed, EmbedDim                   int
 	NumHeads, HeadDim                    int
@@ -81,6 +84,7 @@ type Config struct {
 // NewConfigFromWeights creates a transformers config model, based on the structure of the loaded model weights.
 func NewConfigFromWeights(weights *trees.Tree[*tensors.Tensor]) (*Config, error) {
 	c := &Config{
+		VocabularySize:        VocabularySize,
 		Weights:               weights,
 		MaxCacheLength:        1024,
 		QueryPreAttentionNorm: QueryNormTypeByOneOverSqrtHeadDim,
