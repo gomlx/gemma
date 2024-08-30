@@ -3,6 +3,7 @@ package samplers
 
 import (
 	"github.com/dustin/go-humanize"
+	"github.com/gomlx/exceptions"
 	"github.com/gomlx/gemma/transformers"
 	"github.com/gomlx/gemma/trees"
 	"github.com/gomlx/gomlx/backends"
@@ -68,21 +69,30 @@ func New(backend backends.Backend, vocab Vocabulary, modelWeights *trees.Tree[*t
 		return nil, err
 	}
 	s.Config.UploadWeights(s.Context.In("model"), modelWeights)
+	s.Context = s.Context.Reuse()
 	s.SampleStep = context.NewExec(backend, s.Context, s.sampleStepGraphFn())
 	return s, nil
 }
 
 // Sample the continuation from the given prompts.
-func (s *Sampler) Sample(prompts []string) []string {
+func (s *Sampler) Sample(prompts []string) ([]string, error) {
 	return s.SampleMaxTokens(prompts, s.MaxGeneratedTokens)
 }
 
 // SampleMaxTokens is like Sample, but instead of using the default MaxGenerateTokens, uses the given maxTokens instead.
-func (s *Sampler) SampleMaxTokens(prompts []string, maxTokens int) []string {
+func (s *Sampler) SampleMaxTokens(prompts []string, maxTokens int) ([]string, error) {
 	promptIds := xslices.Map(prompts, s.Vocab.EncodeAsIDs)
-	state := s.initialState(promptIds, maxTokens)
-	state = s.sampleLoop(state)
-	return s.decode(state)
+	state, err := s.initialState(promptIds, maxTokens)
+	if err != nil {
+		return nil, err
+	}
+	err = exceptions.TryCatch[error](func() {
+		state = s.sampleLoop(state)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return s.decode(state), nil
 }
 
 // sampleLoop, executes a sampleStep until all examples in the batch are finished.
@@ -129,7 +139,7 @@ func (s *Sampler) sampleLoop(state samplingState) samplingState {
 		done := tensors.ToScalar[bool](extraOutputs[0])
 
 		// End-of-sampling:
-		if done || count == 2 {
+		if done || count == 1 {
 			break
 		}
 	}
@@ -258,7 +268,7 @@ type samplingState struct {
 // It also returns the mask, that is set to true where it is not padding.
 //
 // It also adds a "bos" (beginning of sentence) token to each prompt.
-func (s *Sampler) initialState(promptIds [][]int, maxTokens int) (state samplingState) {
+func (s *Sampler) initialState(promptIds [][]int, maxTokens int) (state samplingState, err error) {
 	state.MaxTokens = maxTokens
 	state.BatchSize = len(promptIds)
 	batchSize := state.BatchSize
@@ -303,7 +313,10 @@ func (s *Sampler) initialState(promptIds [][]int, maxTokens int) (state sampling
 	if klog.V(1).Enabled() {
 		start = time.Now()
 	}
-	state.Cache = transformers.NewCache(s.Config, batchSize)
+	state.Cache, err = transformers.NewCache(s.Config, batchSize)
+	if err != nil {
+		return
+	}
 	if s.CacheTreeStructure == nil {
 		s.CacheTreeStructure = trees.Map(state.Cache.Data, func(_ trees.Path, _ *tensors.Tensor) (empty struct{}) { return })
 	}
