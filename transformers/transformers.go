@@ -7,6 +7,8 @@ import (
 	"github.com/gomlx/gemma/trees"
 	. "github.com/gomlx/gomlx/graph"
 	"github.com/gomlx/gomlx/ml/context"
+	"github.com/gomlx/gomlx/types/shapes"
+	"github.com/gomlx/gopjrt/dtypes"
 	"github.com/pkg/errors"
 )
 
@@ -26,8 +28,21 @@ func GemmaWithCache(ctx *context.Context, config *Config,
 		layerIdx++
 		return fmt.Sprintf("%03d_", layerIdx)
 	}
+
+	// Embed.
 	x := EmbedTokens(ctx.In(nextLayerIdx()+"_embedder"), config, currentTokens)
-	x.SetLogged("embedding_values")
+
+	// Run through numLayers blocks.
+	for blockIdx := range config.NumLayers {
+		blockName := fmt.Sprintf("layer_%d", blockIdx)
+		blockCtx := ctx.In(nextLayerIdx() + blockName)
+		blockCache := cache.Map[blockName]
+		x = Block(blockCtx, config, blockName, x, currentPositions, blockCache, cacheAttentionMask)
+		x.SetLogged(blockName)
+		if true {
+			break
+		}
+	}
 	_ = x
 	return nil
 }
@@ -36,14 +51,27 @@ func GemmaWithCache(ctx *context.Context, config *Config,
 func EmbedTokens(ctx *context.Context, config *Config, currentTokens *Node) *Node {
 	g := currentTokens.Graph()
 	treePath := []string{"transformer", "embedder", "input_embedding"}
-	embedTableT, err := config.Weights.Get(treePath)
-	if err != nil {
-		panic(errors.Wrapf(err, "tranformer model missing embedding table weights in path %q", treePath))
+	var embedTableVar *context.Variable
+	if config.Weights != nil {
+		// Initialize variables from config weights:
+		embedTableT, err := config.Weights.Get(treePath)
+		if err != nil {
+			panic(errors.Wrapf(err, "tranformer model missing embedding table weights in path %q", treePath))
+		}
+		embedTableVar = ctx.VariableWithValue("embeddings", embedTableT)
+	} else {
+		// Default variable initialization (likely read from checkpoint)
+		embedTableVar = ctx.VariableWithShape("embeddings", shapes.Make(dtypes.BFloat16, config.VocabularySize, config.EmbedDim))
 	}
-	embedTableVar := ctx.VariableWithValue("embeddings", embedTableT)
 	embedTable := embedTableVar.ValueGraph(g)
 	embeddings := Gather(embedTable, currentTokens)
-	embedDim := Scalar(g, embeddings.DType(), float64(embedTable.Shape().Dimensions[embedTable.Rank()-1]))
-	embeddings = Mul(embeddings, Sqrt(embedDim))
+	embeddings = Mul(embeddings, Sqrt(Scalar(g, embeddings.DType(), float64(config.EmbedDim))))
 	return embeddings
+}
+
+// Block implements one transformer block for the Gemma model.
+func Block(ctx *context.Context, config *Config, blockName string, x, positions *Node, cache *trees.Tree[*Node], cacheAttentionMask *Node) *Node {
+	blockWeights := config.Weights.Map["transformer"].Map[blockName]
+	_ = blockWeights
+	return x
 }

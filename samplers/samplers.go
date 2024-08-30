@@ -62,12 +62,12 @@ func New(backend backends.Backend, vocab Vocabulary, modelWeights *trees.Tree[*t
 		MaxGeneratedTokens: maxGeneratedTokens,
 		Context:            context.New(),
 	}
-	s.SampleStep = context.NewExec(backend, s.Context, s.sampleStepGraphFn())
 	var err error
 	s.Config, err = transformers.NewConfigFromWeights(modelWeights)
 	if err != nil {
 		return nil, err
 	}
+	s.SampleStep = context.NewExec(backend, s.Context, s.sampleStepGraphFn())
 	return s, nil
 }
 
@@ -128,7 +128,7 @@ func (s *Sampler) sampleLoop(state samplingState) samplingState {
 		done := tensors.ToScalar[bool](extraOutputs[0])
 
 		// End-of-sampling:
-		if done {
+		if done || count == 2 {
 			break
 		}
 	}
@@ -184,28 +184,30 @@ func (s *Sampler) sampleStepGraphFn() func(*context.Context, []*Node) []*Node {
 		// Attention to all positions < current step number (stepNum).
 		// Notice that the cache rotates, so once stepNum > Config.MaxCacheLength, the mask will be
 		// true everywhere.
-		attentionMask := Iota(g, shapes.Make(dtypes.Int32, batchSize, 1, s.Config.MaxCacheLength), 1)
-		attentionMask = LessOrEqual(attentionMask, stepNum)
+		cacheAttentionMask := Iota(g, shapes.Make(dtypes.Int32, batchSize, 1, s.Config.MaxCacheLength), 1)
+		cacheAttentionMask = LessOrEqual(cacheAttentionMask, stepNum)
 
-		logits := transformers.GemmaWithCache(ctx.In("model"), s.Weights,
-			currentTokens, currentPositions, cache, attentionMask)
+		logits := transformers.GemmaWithCache(ctx.In("model"), s.Config,
+			currentTokens, currentPositions, cache, cacheAttentionMask)
 
 		nextTokenNum := OnePlus(stepNum)
-		nextPredictedTokens := ExpandDims(ArgMax(logits, -1), -1)
-		nextPredictedTokens.AssertDims(batchSize, 1)
-		nextTokenStartIdx := []*Node{zeroIdx, nextTokenNum}
-		nextTokens := DynamicSlice(inputBuffer, nextTokenStartIdx, []int{batchSize, 1})
-		nextTokens.AssertDims(batchSize, 1)
-		nextTokens = Where(
-			Or(
-				Equal(nextTokens, Const(g, int32(s.Vocab.PadID()))),
-				ExpandDims(done, -1),
-			),
-			nextPredictedTokens,
-			nextTokens,
-		)
-		inputBuffer = DynamicUpdateSlice(inputBuffer, nextTokens, nextTokenStartIdx)
-		done = Or(done, Equal(nextTokens, Const(g, int32(s.Vocab.EndOfSentenceID()))))
+		if logits != nil {
+			nextPredictedTokens := ExpandDims(ArgMax(logits, -1), -1)
+			nextPredictedTokens.AssertDims(batchSize, 1)
+			nextTokenStartIdx := []*Node{zeroIdx, nextTokenNum}
+			nextTokens := DynamicSlice(inputBuffer, nextTokenStartIdx, []int{batchSize, 1})
+			nextTokens.AssertDims(batchSize, 1)
+			nextTokens = Where(
+				Or(
+					Equal(nextTokens, Const(g, int32(s.Vocab.PadID()))),
+					ExpandDims(done, -1),
+				),
+				nextPredictedTokens,
+				nextTokens,
+			)
+			inputBuffer = DynamicUpdateSlice(inputBuffer, nextTokens, nextTokenStartIdx)
+			done = Or(done, Equal(nextTokens, Const(g, int32(s.Vocab.EndOfSentenceID()))))
+		}
 
 		// Prepare next step: are we done ?
 		stepNum = nextTokenNum
