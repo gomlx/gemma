@@ -1,12 +1,14 @@
 package transformers
 
 import (
+	"github.com/gomlx/exceptions"
 	"github.com/gomlx/gemma/trees"
 	"github.com/gomlx/gomlx/ml/context"
 	"github.com/gomlx/gomlx/types/tensors"
 	"github.com/gomlx/gopjrt/dtypes"
 	"github.com/pkg/errors"
 	"maps"
+	"math"
 	"strings"
 )
 
@@ -160,4 +162,19 @@ func (c *Config) UploadWeights(ctx *context.Context, weights *trees.Tree[*tensor
 		_ = scopedCtx.VariableWithValue(varName, tensor)
 	}
 	return ctx
+}
+
+// QueryPreAttentionScalar is a multiplier to the query projections.
+func (c *Config) QueryPreAttentionScalar() float64 {
+	switch c.QueryPreAttentionNorm {
+	case QueryNormTypeByEmbedDimDivNumHeads:
+		return float64(c.EmbedDim / c.NumHeads)
+	case QueryNormTypeByOneOverSqrtEmbedDimDivNumHeads:
+		return math.Sqrt(float64(c.EmbedDim / c.NumHeads))
+	case QueryNormTypeByOneOverSqrtHeadDim:
+		return math.Sqrt(float64(c.HeadDim))
+	default:
+		exceptions.Panicf("invalid value of QueryPreAttentionNorm = %d, expected one of the valid enum values", c.QueryPreAttentionNorm)
+		panic(nil) // Quiet lint.
+	}
 }
