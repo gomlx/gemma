@@ -13,7 +13,7 @@ type expectedTreeValueType[T any] struct {
 
 func verifyTreeValues[T any](t *testing.T, tree *Tree[T], wantValues []expectedTreeValueType[T]) {
 	for _, want := range wantValues {
-		got, err := tree.Get(want.p)
+		got, err := tree.Get(want.p...)
 		require.NoError(t, err)
 		require.Equal(t, want.v, got)
 	}

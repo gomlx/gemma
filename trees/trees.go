@@ -45,7 +45,7 @@ var DefaultTreePath = []string{"#root"}
 // It returns an error if such a leaf node doesn't exist.
 //
 // Empty values in treePath are not used.
-func (tree *Tree[T]) Get(treePath Path) (value T, err error) {
+func (tree *Tree[T]) Get(treePath ...string) (value T, err error) {
 	// Remove empty ("") path components -- clone the slice, not to modify caller's slice.
 	if slices.Index(treePath, "") > 0 {
 		treePath = slices.DeleteFunc(slices.Clone(treePath),
