@@ -1,10 +1,12 @@
 package transformers
 
 import (
+	"github.com/gomlx/exceptions"
 	. "github.com/gomlx/gomlx/graph"
 	"github.com/gomlx/gomlx/ml/context"
 	"github.com/gomlx/gomlx/ml/context/initializers"
 	"github.com/gomlx/gomlx/types/shapes"
+	"github.com/gomlx/gopjrt/dtypes"
 )
 
 // KernelEinsum multiplies the input by a kernel of the given shape, using the given graph.EinSum equation.
@@ -12,7 +14,7 @@ func KernelEinsum(ctx *context.Context, equation string, x *Node, kernelShape sh
 	g := x.Graph()
 	kernelVar := ctx.VariableWithShape("w", kernelShape)
 	kernel := kernelVar.ValueGraph(g)
-	kernel.SetLogged("EinSum::kernel")
+	//kernel.SetLogged("EinSum::kernel")
 	return Einsum(equation, x, kernel)
 
 }
@@ -33,4 +35,61 @@ func RMSNorm(ctx *context.Context, x *Node) *Node {
 	scale = OnePlus(scale)
 	normalizedX = Mul(scale, normalizedX)
 	return normalizedX
+}
+
+// RoPEDefaultMaxWaveLength is a default value to use for rotary positional encoding.
+// See ApplyRotaryPositionEncoding.
+const RoPEDefaultMaxWaveLength = 10_000
+
+// ApplyRotaryPositionEncoding (aka. RoPE) applies the positional encoding to the operand, given the positions
+// (integer numbers of the position).
+//
+// - operand: the last axis ("features" or "embedding" axis) must be divisible by 2. The shape usually is [batchSize, sequenceSize, numHeads, headDim].
+// - positions: its shape must be a prefix to operand. Typically, it's shaped [batchSize, sequenceSize].
+// - maxWaveLength: it uses wave lengths in a power scale, up to maxWaveLength -- see RoPEDefaultMaxWaveLength for a reasonable value.
+//
+// Reference: https://arxiv.org/abs/2104.09864
+func ApplyRotaryPositionEncoding(operand, positions *Node, maxWaveLength int) *Node {
+	g := operand.Graph()
+	dtype := operand.DType()
+	featuresDim := operand.Shape().Dim(-1)
+	if featuresDim <= 0 || featuresDim%2 != 0 {
+		exceptions.Panicf("ApplyRotaryPositionEncoding(operand=%s, position=%s) requires operand's last "+
+			"dimension to be >= 0 and divisible by 2", operand.Shape(), positions.Shape())
+	}
+
+	transientDType := dtype
+	if dtype == dtypes.Float16 || dtype == dtypes.BFloat16 {
+		transientDType = dtypes.Float32
+	}
+	fraction := Iota(g, shapes.Make(transientDType, featuresDim/2), 0)
+	fraction = MulScalar(fraction, 2.0/float64(featuresDim))
+	timeScale := Pow(Scalar(g, transientDType, float64(maxWaveLength)), fraction)
+	timeScale = ExpandLeftToRank(timeScale, positions.Rank()+1)
+
+	// Angles shape will add a rank to positions: we will take each position at a different wave length (or timeScale).
+	angles := ConvertDType(ExpandDims(positions, -1), transientDType)
+	angles = Div(angles, timeScale)
+
+	// Insert an axis just before the last until it matches the operand's shape.
+	for angles.Rank() < operand.Rank() {
+		angles = ExpandDims(angles, -2)
+	}
+	sines := Sin(angles)
+	sines.SetLogged("ApplyRotaryPositionEncoding()::sines")
+	cosines := Cos(angles)
+
+	// Question: shouldn't we simply convert sines and cosines back to dtype here.
+	operand = ConvertDType(operand, transientDType)
+	firstHalf := Slice(operand, AxisRange().Spacer(), AxisRange(0, featuresDim/2))
+	secondHalf := Slice(operand, AxisRange().Spacer(), AxisRangeToEnd(featuresDim/2))
+	firstHalfUpdate := Sub(
+		Mul(firstHalf, cosines),
+		Mul(secondHalf, sines),
+	)
+	secondHalfUpdate := Add(
+		Mul(secondHalf, cosines),
+		Mul(firstHalf, sines),
+	)
+	return ConvertDType(Concatenate([]*Node{firstHalfUpdate, secondHalfUpdate}, -1), dtype)
 }

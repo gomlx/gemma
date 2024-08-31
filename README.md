@@ -17,3 +17,6 @@ GoMLX implementation of Google's Gemma model
    This is a pure Go implementation of encoding and decoding text with the [SentencePiece tokenizer](https://github.com/google/sentencepiece).
 
 
+## TODO
+
+* Prevent upscaling dtype (from bfloat16 to float32) during ApplyRotaryPositionEncoding: probably save a bit of memory and time.
