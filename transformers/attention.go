@@ -133,6 +133,9 @@ func Attention(ctx *context.Context, config *Config, attentionIdx int, x, positi
 	}
 
 	if config.AttentionTypes[attentionIdx] == AttentionTypeLocalSliding {
+		// Create a sliding mask: a mask that has a band (2*config.SlidingWindowSize) around the diagonal.
+		// Issue: this will not work when using cache, and the cache loops around its config.MaxCacheLength, since
+		//        the sliding mask "band" won't wrap around.
 		if config.SlidingWindowSize <= 0 {
 			exceptions.Panicf("Config.SlidingWindowSize must be set for AttentionTypeLocalSliding")
 		}
