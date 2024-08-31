@@ -19,4 +19,4 @@ GoMLX implementation of Google's Gemma model
 
 ## TODO
 
-* Prevent upscaling dtype (from bfloat16 to float32) during ApplyRotaryPositionEncoding: probably save a bit of memory and time.
+* Prevent up-scaling dtype (from bfloat16 to float32) during ApplyRotaryPositionEncoding: probably save a bit of memory and time.

@@ -79,6 +79,8 @@ type Config struct {
 	MaxCacheLength        int
 	QueryPreAttentionNorm QueryPreAttentionNormalisationType
 
+	// AttentionLogitsSoftCap limits the attention logits (logits = AttentionLogitsSoftCap * tanh(logits/AttentionLogitsSoftCap)).
+	// Enabled if > 0.
 	AttentionLogitsSoftCap float64
 	SlidingWindowSize      int
 	TransposeGatingEinsum  bool

@@ -31,7 +31,7 @@ func GemmaWithCache(ctx *context.Context, config *Config,
 		blockName := fmt.Sprintf("layer_%d", blockIdx)
 		blockCtx := ctx.In(blockName)
 		blockCache := cache.Map[blockName]
-		x = Block(blockCtx, config, x, currentPositions, blockCache, cacheAttentionMask)
+		x = Block(blockCtx, config, blockIdx, x, currentPositions, blockCache, cacheAttentionMask)
 		if true {
 			break
 		}
@@ -61,14 +61,16 @@ func EmbedTokens(ctx *context.Context, config *Config, currentTokens *Node) *Nod
 // Block implements one transformer block for the Gemma model. x is shaped [batchSize, sequenceSize], and if
 // using cache (cache != nil), x will only contain the current token, shaped [batchSize, 1].
 //
+// The attentionIdx indexes attention configuration (in config) parameters, like config.AttentionTypes.
+//
 // If cache is given, attentionMask is relative to the cache. Otherwise, attentionMask is relative to the operand x.
-func Block(ctx *context.Context, config *Config, x, positions *Node, cache *trees.Tree[*Node], attentionMask *Node) *Node {
+func Block(ctx *context.Context, config *Config, attentionIdx int, x, positions *Node, cache *trees.Tree[*Node], attentionMask *Node) *Node {
 	x.SetLogged("block input")
 	normalizedX := RMSNorm(ctx.In("pre_attention_norm"), x)
 	normalizedX.SetLogged("Block::pre_attention_norm")
 
 	// Attention
-	attentionOut := Attention(ctx.In("attn"), config, normalizedX, positions, cache, attentionMask)
+	attentionOut := Attention(ctx.In("attn"), config, attentionIdx, normalizedX, positions, cache, attentionMask)
 	if true {
 		return nil
 	}
