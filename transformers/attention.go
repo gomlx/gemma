@@ -128,6 +128,7 @@ func Attention(ctx *context.Context, config *Config, attentionIdx int, x, positi
 	}
 
 	if config.AttentionLogitsSoftCap > 0 {
+		// Soft cap using Tanh (an S-like curve)
 		logits = Tanh(DivScalar(logits, config.AttentionLogitsSoftCap))
 		logits = MulScalar(logits, config.AttentionLogitsSoftCap)
 	}
@@ -146,6 +147,7 @@ func Attention(ctx *context.Context, config *Config, attentionIdx int, x, positi
 		)
 		attentionMask = And(attentionMask, slidingMask)
 	}
+
 	//for k, node := range cache.Map {
 	//	node.Value.SetLogged(k)
 	//}
