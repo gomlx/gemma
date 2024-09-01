@@ -63,11 +63,13 @@ const VocabularySize = 256128 // Should come with the vocabulary, but it also de
 
 // Config Gemma transformer model.
 type Config struct {
-	Type                                 GemmaType
-	DType                                dtypes.DType
-	VocabularySize                       int
-	NumLayers                            int
-	NumEmbed, EmbedDim                   int
+	Type                GemmaType
+	DType               dtypes.DType
+	VocabularySize      int
+	NumLayers, NumEmbed int
+
+	//EmbedDim is also called "features" in the original code. It is the representation size (last dimension) of the output of the attention layers.
+	EmbedDim                             int
 	NumHeads, HeadDim                    int
 	HiddenDim                            int
 	NumKVHeads                           int
@@ -172,9 +174,9 @@ func (c *Config) QueryPreAttentionScalar() float64 {
 	case QueryNormTypeByEmbedDimDivNumHeads:
 		return float64(c.EmbedDim / c.NumHeads)
 	case QueryNormTypeByOneOverSqrtEmbedDimDivNumHeads:
-		return math.Sqrt(float64(c.EmbedDim / c.NumHeads))
+		return 1.0 / math.Sqrt(float64(c.EmbedDim/c.NumHeads))
 	case QueryNormTypeByOneOverSqrtHeadDim:
-		return math.Sqrt(float64(c.HeadDim))
+		return 1.0 / math.Sqrt(float64(c.HeadDim))
 	default:
 		exceptions.Panicf("invalid value of QueryPreAttentionNorm = %d, expected one of the valid enum values", c.QueryPreAttentionNorm)
 		panic(nil) // Quiet lint.

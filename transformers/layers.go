@@ -5,16 +5,26 @@ import (
 	. "github.com/gomlx/gomlx/graph"
 	"github.com/gomlx/gomlx/ml/context"
 	"github.com/gomlx/gomlx/ml/context/initializers"
+	"github.com/gomlx/gomlx/ml/layers/activations"
 	"github.com/gomlx/gomlx/types/shapes"
 	"github.com/gomlx/gopjrt/dtypes"
 )
+
+// SoftCap using Tanh to the given cap. If cap is 0, it is a no-op.
+//
+// SoftCap(x) = Tanh(x/cap) * cap
+func SoftCap(x *Node, cap float64) *Node {
+	if cap <= 0 {
+		return x
+	}
+	return MulScalar(Tanh(DivScalar(x, cap)), cap)
+}
 
 // KernelEinsum multiplies the input by a kernel of the given shape, using the given graph.EinSum equation.
 func KernelEinsum(ctx *context.Context, equation string, x *Node, kernelShape shapes.Shape) *Node {
 	g := x.Graph()
 	kernelVar := ctx.VariableWithShape("w", kernelShape)
 	kernel := kernelVar.ValueGraph(g)
-	//kernel.SetLogged("EinSum::kernel")
 	return Einsum(equation, x, kernel)
 
 }
@@ -76,7 +86,6 @@ func ApplyRotaryPositionEncoding(operand, positions *Node, maxWaveLength int) *N
 		angles = ExpandDims(angles, -2)
 	}
 	sines := Sin(angles)
-	sines.SetLogged("ApplyRotaryPositionEncoding()::sines")
 	cosines := Cos(angles)
 
 	// Question: shouldn't we simply convert sines and cosines back to dtype here.
@@ -92,4 +101,41 @@ func ApplyRotaryPositionEncoding(operand, positions *Node, maxWaveLength int) *N
 		Mul(firstHalf, sines),
 	)
 	return ConvertDType(Concatenate([]*Node{firstHalfUpdate, secondHalfUpdate}, -1), dtype)
+}
+
+// GatedFeedForward layer for Gemma:
+// - hiddenDim: one intermediary layer.
+// - transposeGatingEinsum: for some versions of Gemma, the gating (hidden) weights have the axes transposed.
+// - It uses Gelu as activation function for the gating signal (multiplied by the up-projected values).
+func GatedFeedForward(ctx *context.Context, x *Node, hiddenDim int, transposeGatingEinsum bool) *Node {
+	g := x.Graph()
+	featuresDim := x.Shape().Dim(-1)
+
+	var gatingWeights *Node
+	if transposeGatingEinsum {
+		// Some versions of Gemma use an alternate parameter ordering that transposes hiddenDim and outputDim.
+		gatingVar := ctx.WithInitializer(initializers.Zero).
+			VariableWithShape("gating_einsum", shapes.Make(x.DType(), 2, hiddenDim, featuresDim))
+		gatingWeights = gatingVar.ValueGraph(g)
+		gatingWeights = Transpose(gatingWeights, 1, 2)
+	} else {
+		// Standard shape of the gating weights.
+		gatingVar := ctx.WithInitializer(initializers.Zero).
+			VariableWithShape("gating_einsum", shapes.Make(x.DType(), 2, featuresDim, hiddenDim))
+		gatingWeights = gatingVar.ValueGraph(g)
+	}
+	gatingWeights0 := Squeeze(Slice(gatingWeights, AxisElem(0)), 0)
+	gatingWeights1 := Squeeze(Slice(gatingWeights, AxisElem(1)), 0)
+
+	gateValue := DotGeneral(x, []int{-1}, nil, gatingWeights0, []int{0}, nil)
+	gateValue = activations.Gelu(gateValue)
+
+	upProjection := DotGeneral(x, []int{-1}, nil, gatingWeights1, []int{0}, nil)
+	upProjection = Mul(gateValue, upProjection) // Gate upProjection.
+
+	downProjectionVar := ctx.WithInitializer(initializers.Zero).
+		VariableWithShape("linear", shapes.Make(x.DType(), hiddenDim, featuresDim))
+	downProjectionWeights := downProjectionVar.ValueGraph(g)
+	output := DotGeneral(upProjection, []int{-1}, nil, downProjectionWeights, []int{0}, nil)
+	return output
 }

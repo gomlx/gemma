@@ -22,6 +22,8 @@ import (
 // of the prediction of the next token.
 func GemmaWithCache(ctx *context.Context, config *Config,
 	currentTokens, currentPositions *Node, cache *trees.Tree[*Node], cacheAttentionMask *Node) *Node {
+	batchSize := currentTokens.Shape().Dim(0)
+	seqLength := currentTokens.Shape().Dim(1)
 
 	// Embed.
 	x := EmbedTokens(ctx.In("embedder"), config, currentTokens)
@@ -32,12 +34,22 @@ func GemmaWithCache(ctx *context.Context, config *Config,
 		blockCtx := ctx.In(blockName)
 		blockCache := cache.Map[blockName]
 		x = Block(blockCtx, config, blockIdx, x, currentPositions, blockCache, cacheAttentionMask)
-		if true {
-			break
-		}
+		//x.SetLogged(fmt.Sprintf("GemmaWithCache::x(%s)", blockName))
+		x = Identity(x)
 	}
-	_ = x
-	return nil
+
+	x = RMSNorm(ctx.In("final_norm"), x)
+	x.SetLogged("GemmaWithCache::x(before_decoding)")
+	logits := DecodeTokens(ctx.Reuse().In("embedder"), config, x)
+	logits = SoftCap(logits, config.FinalLogitSoftCap)
+
+	// Debug
+	logits.SetLogged("GemmaWithCache::logits")
+	ArgMax(logits, -1).SetLogged("GemmaWithCache::logits argmax")
+	ReduceMax(logits, -1).SetLogged("GemmaWithCache::logits max")
+
+	logits.AssertDims(batchSize, seqLength, config.VocabularySize)
+	return logits
 }
 
 func debugContext(ctx *context.Context) {
@@ -48,33 +60,37 @@ func debugContext(ctx *context.Context) {
 }
 
 // EmbedTokens using weights in Config.
-// Input: currentTokens: [batchSize, sequenceSize]
-// Output: embeddings: [batchSize, sequenceSize, config.EmbedDim]
+// Input: currentTokens: [batchSize, sequenceLength]
+// Output: embeddings: [batchSize, sequenceLength, config.EmbedDim]
 func EmbedTokens(ctx *context.Context, config *Config, currentTokens *Node) *Node {
 	g := currentTokens.Graph()
 	embedTableVar := ctx.VariableWithShape("input_embedding", shapes.Make(dtypes.BFloat16, config.VocabularySize, config.EmbedDim))
 	embeddings := Gather(embedTableVar.ValueGraph(g), ExpandDims(currentTokens, -1))
-	embeddings = Mul(embeddings, Sqrt(Scalar(g, embeddings.DType(), float64(config.EmbedDim))))
+	embeddings = Mul(embeddings, Sqrt(Scalar(g, embeddings.DType(), config.EmbedDim)))
 	return embeddings
 }
 
-// Block implements one transformer block for the Gemma model. x is shaped [batchSize, sequenceSize], and if
+// DecodeTokens use the same table as EmbedTokens to convert embedding back to the tokens -- or to token logits.
+// Input: current embeddings: [batchSize, sequenceLength, embedDim]
+// Output: logits for each token: [batchSize, sequenceLength, vocabularySize]
+func DecodeTokens(ctx *context.Context, config *Config, x *Node) *Node {
+	g := x.Graph()
+	embedTableVar := ctx.VariableWithShape("input_embedding", shapes.Make(dtypes.BFloat16, config.VocabularySize, config.EmbedDim))
+	embedTable := embedTableVar.ValueGraph(g)
+	return DotGeneral(x, []int{-1}, nil, embedTable, []int{-1}, nil)
+}
+
+// Block implements one transformer block for the Gemma model. x is shaped [batchSize, sequenceLength], and if
 // using cache (cache != nil), x will only contain the current token, shaped [batchSize, 1].
 //
 // The attentionIdx indexes attention configuration (in config) parameters, like config.AttentionTypes.
 //
 // If cache is given, attentionMask is relative to the cache. Otherwise, attentionMask is relative to the operand x.
 func Block(ctx *context.Context, config *Config, attentionIdx int, x, positions *Node, cache *trees.Tree[*Node], attentionMask *Node) *Node {
-	x.SetLogged("block input")
 	normalizedX := RMSNorm(ctx.In("pre_attention_norm"), x)
-	normalizedX.SetLogged("Block::pre_attention_norm")
 
 	// Attention
 	attentionOut := Attention(ctx.In("attn"), config, attentionIdx, normalizedX, positions, cache, attentionMask)
-	if true {
-		return nil
-	}
-	attentionOut.SetLogged("Block::attentionOut")
 	if config.UsePostAttentionNorm {
 		attentionOut = RMSNorm(ctx.In("post_attention_norm"), attentionOut)
 	}
@@ -82,12 +98,14 @@ func Block(ctx *context.Context, config *Config, attentionIdx int, x, positions 
 	// Residual (or skip) connection.
 	attentionOut = Add(attentionOut, x)
 
-	// One feed-forward ("ffw") layer.
+	// GatedFeedForward ("ffw") layer: 2 layers, with a gate.
 	output := RMSNorm(ctx.In("pre_ffw_norm"), attentionOut)
-
-	//...ffw
+	output = GatedFeedForward(ctx.In("mlp"), output, config.HiddenDim, config.TransposeGatingEinsum)
 	if config.UsePostFFWNorm {
 		output = RMSNorm(ctx.In("post_ffw_norm"), output)
 	}
+
+	// Residual to attentionOut.
+	output = Add(output, attentionOut)
 	return output
 }
