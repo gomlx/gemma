@@ -5,11 +5,13 @@
 
 GoMLX (for Go) port of Google Deepmind's Gemma GenAI/LLM model.
 
-## 📖 About gemma
-
+## 📖 About GoMLX Gemma
 
 An implementation of [Google DeepMind](deepmind.google)'s [Gemma model](https://github.com/google-deepmind/gemma?tab=readme-ov-file)
 using [GoMLX, a Machine Learning framework for Go](https://github.com/gomlx/gomlx).
+
+It is very "_fresh from the oven_", so use it at your own risk. 
+At the same time, I'm happy to help if you need any specific features, it's a good time to line up requests.
 
 ✅ **What is done** already:
 
@@ -94,3 +96,5 @@ And here is how it is used:
 * Prevent up-scaling dtype (from bfloat16 to float32) during ApplyRotaryPositionEncoding: probably save a bit of memory and time.
 * Remove special symbols from sampling, like "<end_of_turn>".
 * Fine-tuning demo.
+* Benchmarking: how does it compare to Jax implementation ? Jax JIT-compile the main sampling loop during generation,
+  which could be done with GoMLX, but it would require implementing some new features. Not sure it is needed yet.
