@@ -2,7 +2,6 @@
 package samplers
 
 import (
-	"fmt"
 	"github.com/dustin/go-humanize"
 	"github.com/gomlx/exceptions"
 	"github.com/gomlx/gemma/transformers"
@@ -119,7 +118,9 @@ func (s *Sampler) sampleLoop(state samplingState) samplingState {
 	var execTime, inputsPrepTime time.Duration
 	var count int
 	for {
-		fmt.Printf("\n\nStep %d:\n\n", count)
+		if klog.V(1).Enabled() {
+			klog.Infof("\n\nStep %d:\n\n", count)
+		}
 		inputPrepStart := time.Now()
 		// We donate all the inputs, since they are all going to be updated (saves some GPU memory).
 		for ii := range numMutableInputs {
@@ -343,7 +344,15 @@ func (s *Sampler) decode(state samplingState) []string {
 		for exampleIdx := range state.BatchSize {
 			exampleIds := flatIds[exampleIdx*totalLength : (exampleIdx+1)*totalLength]
 			ids := xslices.Map(exampleIds, func(id int32) int { return int(id) })
-			text[exampleIdx] = s.Vocab.DecodeIDs(ids) // Notice <pad>, <bos> and <eos> are converted to empty strings.
+			nonPad := 0
+			for _, id := range ids {
+				if id == s.Vocab.EndOfSentenceID() || id == s.Vocab.PadID() {
+					break
+				}
+				nonPad++
+			}
+			text[exampleIdx] = s.Vocab.DecodeIDs(ids[:nonPad]) // Notice <pad>, <bos> and <eos> are converted to empty strings.
+			//fmt.Printf("tokens: %#v\n", ids[:nonPad])
 		}
 	})
 	return text

@@ -39,14 +39,12 @@ func GemmaWithCache(ctx *context.Context, config *Config,
 	}
 
 	x = RMSNorm(ctx.In("final_norm"), x)
-	x.SetLogged("GemmaWithCache::x(before_decoding)")
 	logits := DecodeTokens(ctx.Reuse().In("embedder"), config, x)
 	logits = SoftCap(logits, config.FinalLogitSoftCap)
 
 	// Debug
-	logits.SetLogged("GemmaWithCache::logits")
-	ArgMax(logits, -1).SetLogged("GemmaWithCache::logits argmax")
-	ReduceMax(logits, -1).SetLogged("GemmaWithCache::logits max")
+	//ArgMax(logits, -1).SetLogged("GemmaWithCache::logits argmax")
+	//ReduceMax(logits, -1).SetLogged("GemmaWithCache::logits max")
 
 	logits.AssertDims(batchSize, seqLength, config.VocabularySize)
 	return logits
