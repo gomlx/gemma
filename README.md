@@ -1,10 +1,12 @@
 
+<img align="right" src="https://github.com/gomlx/gomlx/raw/main/docs/gomlx_gopher.jpg" alt="GoMLX Gopher" width="128px"/>
+
 # GoMLX Gemma
-GoMLX (for Go) port of Google Deepmind's Gemma model
+
+GoMLX (for Go) port of Google Deepmind's Gemma GenAI/LLM model.
 
 ## 📖 About gemma
 
-<img align="right" src="docs/gomlx_gopher.jpg" alt="GoMLX Gopher" width="128px"/>
 
 An implementation of [Google DeepMind](deepmind.google)'s [Gemma model](https://github.com/google-deepmind/gemma?tab=readme-ov-file)
 using [GoMLX, a Machine Learning framework for Go](https://github.com/gomlx/gomlx).
