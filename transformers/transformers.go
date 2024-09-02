@@ -50,13 +50,6 @@ func GemmaWithCache(ctx *context.Context, config *Config,
 	return logits
 }
 
-func debugContext(ctx *context.Context) {
-	fmt.Printf("ctx: scope=%q\n", ctx.Scope())
-	ctx.EnumerateVariablesInScope(func(v *context.Variable) {
-		fmt.Printf("\t> %q\n", v.ScopeAndName())
-	})
-}
-
 // EmbedTokens using weights in Config.
 // Input: currentTokens: [batchSize, sequenceLength]
 // Output: embeddings: [batchSize, sequenceLength, config.EmbedDim]
