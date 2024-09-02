@@ -93,7 +93,6 @@ And here is how it is used:
 
 ## 📝 TODO
 
-* Prevent up-scaling dtype (from bfloat16 to float32) during ApplyRotaryPositionEncoding: probably save a bit of memory and time.
 * Remove special symbols from sampling, like "<end_of_turn>".
 * Fine-tuning demo.
 * Benchmarking: how does it compare to Jax implementation ? Jax JIT-compile the main sampling loop during generation,

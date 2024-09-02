@@ -118,9 +118,6 @@ func (s *Sampler) sampleLoop(state samplingState) samplingState {
 	var execTime, inputsPrepTime time.Duration
 	var count int
 	for {
-		if klog.V(1).Enabled() {
-			klog.Infof("\n\nStep %d:\n\n", count)
-		}
 		inputPrepStart := time.Now()
 		// We donate all the inputs, since they are all going to be updated (saves some GPU memory).
 		for ii := range numMutableInputs {

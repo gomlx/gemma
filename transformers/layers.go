@@ -7,10 +7,9 @@ import (
 	"github.com/gomlx/gomlx/ml/context/initializers"
 	"github.com/gomlx/gomlx/ml/layers/activations"
 	"github.com/gomlx/gomlx/types/shapes"
-	"github.com/gomlx/gopjrt/dtypes"
 )
 
-// SoftCap using Tanh to the given cap. If cap is 0, it is a no-op.
+// SoftCap using Tanh, so values won't go beyond +/- cap. If cap <= 0, it is a no-op.
 //
 // SoftCap(x) = Tanh(x/cap) * cap
 func SoftCap(x *Node, cap float64) *Node {
@@ -29,7 +28,7 @@ func KernelEinsum(ctx *context.Context, equation string, x *Node, kernelShape sh
 
 }
 
-// RMSNorm normalizes by its root-mean-square (x = x / (mean(sqrt(x), axis=-1) + epsilon)) and applies a learned scale.
+// RMSNorm normalizes by its root-mean-square x = x / √(mean(sqrt(x), axis=-1) + epsilon) and applies a learned scale.
 func RMSNorm(ctx *context.Context, x *Node) *Node {
 	g := x.Graph()
 	variance := ReduceAndKeep(Square(x), ReduceMean, -1)
@@ -69,9 +68,6 @@ func ApplyRotaryPositionEncoding(operand, positions *Node, maxWaveLength int) *N
 	}
 
 	transientDType := dtype
-	if dtype == dtypes.Float16 || dtype == dtypes.BFloat16 {
-		transientDType = dtypes.Float32
-	}
 	fraction := Iota(g, shapes.Make(transientDType, featuresDim/2), 0)
 	fraction = MulScalar(fraction, 2.0/float64(featuresDim))
 	timeScale := Pow(Scalar(g, transientDType, float64(maxWaveLength)), fraction)
