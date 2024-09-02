@@ -84,8 +84,7 @@ func ApplyRotaryPositionEncoding(operand, positions *Node, maxWaveLength int) *N
 	sines := Sin(angles)
 	cosines := Cos(angles)
 
-	// Question: shouldn't we simply convert sines and cosines back to dtype here.
-	operand = ConvertDType(operand, transientDType)
+	// Split first/second half of operands features (the last dimension), and apply rotation at the various wave lengths.
 	firstHalf := Slice(operand, AxisRange().Spacer(), AxisRange(0, featuresDim/2))
 	secondHalf := Slice(operand, AxisRange().Spacer(), AxisRangeToEnd(featuresDim/2))
 	firstHalfUpdate := Sub(
