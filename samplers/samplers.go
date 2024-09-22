@@ -35,7 +35,6 @@ type Vocabulary interface {
 type Sampler struct {
 	Backend backends.Backend
 	Vocab   Vocabulary
-	Weights *trees.Tree[*tensors.Tensor]
 
 	// MaxGeneratedTokens default for Sampler.Sample.
 	MaxGeneratedTokens int
@@ -55,20 +54,18 @@ type Sampler struct {
 }
 
 // New creates a new sampler with the registered vocabulary and model.
-func New(backend backends.Backend, vocab Vocabulary, modelWeights *trees.Tree[*tensors.Tensor], maxGeneratedTokens int) (*Sampler, error) {
+func New(backend backends.Backend, ctx *context.Context, vocab Vocabulary, maxGeneratedTokens int) (*Sampler, error) {
 	s := &Sampler{
 		Backend:            backend,
 		Vocab:              vocab,
-		Weights:            modelWeights,
 		MaxGeneratedTokens: maxGeneratedTokens,
-		Context:            context.New(),
+		Context:            ctx,
 	}
 	var err error
-	s.Config, err = transformers.NewConfigFromWeights(modelWeights)
+	s.Config, err = transformers.NewConfigFromContext(s.Context.In("model"))
 	if err != nil {
 		return nil, err
 	}
-	s.Config.UploadWeights(s.Context.In("model"), modelWeights)
 	s.Context = s.Context.Reuse()
 	s.SampleStep = context.NewExec(backend, s.Context, s.sampleStepGraphFn())
 	return s, nil

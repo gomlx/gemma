@@ -25,7 +25,6 @@ func KernelEinsum(ctx *context.Context, equation string, x *Node, kernelShape sh
 	kernelVar := ctx.VariableWithShape("w", kernelShape)
 	kernel := kernelVar.ValueGraph(g)
 	return Einsum(equation, x, kernel)
-
 }
 
 // RMSNorm normalizes by its root-mean-square x = x / √(mean(sqrt(x), axis=-1) + epsilon) and applies a learned scale.
@@ -132,5 +131,34 @@ func GatedFeedForward(ctx *context.Context, x *Node, hiddenDim int, transposeGat
 		VariableWithShape("linear", shapes.Make(x.DType(), hiddenDim, featuresDim))
 	downProjectionWeights := downProjectionVar.ValueGraph(g)
 	output := DotGeneral(upProjection, []int{-1}, nil, downProjectionWeights, []int{0}, nil)
+	return output
+}
+
+// HuggingFaceGatedFeedForward layer for Gemma, the HuggingFace version, with transposed weights:
+// - hiddenDim: one intermediary layer.
+// - transposeGatingEinsum: for some versions of Gemma, the gating (hidden) weights have the axes transposed.
+// - It uses Gelu as activation function for the gating signal (multiplied by the up-projected values).
+func HuggingFaceGatedFeedForward(ctx *context.Context, x *Node, hiddenDim int, transposeGatingEinsum bool) *Node {
+	ctx = ctx.In("hf") // extra-scope for HuggingFace version.
+	g := x.Graph()
+	featuresDim := x.Shape().Dim(-1)
+
+	gatingProjVar := ctx.WithInitializer(initializers.Zero).
+		VariableWithShape("gating_proj", shapes.Make(x.DType(), hiddenDim, featuresDim))
+	gatingWeights := gatingProjVar.ValueGraph(g)
+	upProjectionVar := ctx.WithInitializer(initializers.Zero).
+		VariableWithShape("up_proj", shapes.Make(x.DType(), hiddenDim, featuresDim))
+	upProjectionWeights := upProjectionVar.ValueGraph(g)
+
+	gateValue := DotGeneral(x, []int{-1}, nil, gatingWeights, []int{1}, nil)
+	gateValue = activations.Gelu(gateValue)
+
+	upProjection := DotGeneral(x, []int{-1}, nil, upProjectionWeights, []int{1}, nil)
+	upProjection = Mul(gateValue, upProjection) // Gate upProjection.
+
+	downProjectionVar := ctx.WithInitializer(initializers.Zero).
+		VariableWithShape("down_proj", shapes.Make(x.DType(), featuresDim, hiddenDim))
+	downProjectionWeights := downProjectionVar.ValueGraph(g)
+	output := DotGeneral(upProjection, []int{-1}, nil, downProjectionWeights, []int{1}, nil)
 	return output
 }

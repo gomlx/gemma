@@ -62,28 +62,51 @@ func Must1[T any](v T, err error) T {
 //     cache is being used.
 func Attention(ctx *context.Context, config *Config, attentionIdx int, x, positions *Node, cache *trees.Tree[*Node], attentionMask *Node) *Node {
 	g := x.Graph()
+	dtype := x.DType()
 
 	// Calculates projections used in the attention.
 	var queryProjection, keyProjection, valueProjection *Node
-	if config.UseQKV {
-		// B = batchSize
-		// T = sequenceLength
-		// D = config.EmbedDim
+
+	// Glossary of keys for einsum:
+	// B = batchSize
+	// T = sequenceLength
+	// D = config.EmbedDim
+	// N = config.NumHeads
+	// H = config.HeadDim
+	// K = config.NumKVHeads
+	if config.HuggingFaceVersion {
+		// HuggingFace version has separate variables per projection.
+		keyProjectionWeights := ctx.In("hf").
+			VariableWithShape("k_proj", shapes.Make(dtype, config.NumKVHeads*config.HeadDim, config.EmbedDim)).
+			ValueGraph(g)
+		keyProjectionWeights = Reshape(keyProjectionWeights, config.NumKVHeads, config.HeadDim, config.EmbedDim)
+		keyProjection = Einsum("BSD,KHD->BSKH", x, keyProjectionWeights)
+
+		valueProjectionWeights := ctx.In("hf").
+			VariableWithShape("v_proj", shapes.Make(dtype, config.NumKVHeads*config.HeadDim, config.EmbedDim)).
+			ValueGraph(g)
+		valueProjectionWeights = Reshape(valueProjectionWeights, config.NumKVHeads, config.HeadDim, config.EmbedDim)
+		valueProjection = Einsum("BSD,KHD->BSKH", x, valueProjectionWeights)
+
+		queryProjectionWeights := ctx.In("hf").
+			VariableWithShape("q_proj", shapes.Make(dtype, config.NumHeads*config.HeadDim, config.EmbedDim)).
+			ValueGraph(g)
+		queryProjectionWeights = Reshape(queryProjectionWeights, config.NumHeads, config.HeadDim, config.EmbedDim)
+		queryProjection = Einsum("BSD,NHD->BSNH", x, queryProjectionWeights)
+
+	} else if config.UseQKV {
 		// S = 3, one extra dimensions for query, key, value projections
-		// N = config.NumHeads
-		// H = config.HeadDim
 		qkvProjections := KernelEinsum(ctx.In("qkv_einsum"), "BTD,SNDH->SBTNH", x,
-			shapes.Make(x.DType() /* k, q, v = 3 */, 3, config.NumHeads, config.EmbedDim, config.HeadDim))
+			shapes.Make(dtype /* k, q, v = 3 */, 3, config.NumHeads, config.EmbedDim, config.HeadDim))
 		queryProjection = Squeeze(Slice(qkvProjections, AxisElem(0)), 0)
 		keyProjection = Squeeze(Slice(qkvProjections, AxisElem(1)), 0)
 		valueProjection = Squeeze(Slice(qkvProjections, AxisElem(2)), 0)
 	} else {
 		queryProjection = KernelEinsum(ctx.In("q_einsum"), "BTD,NDH->BTNH", x,
-			shapes.Make(x.DType(), config.NumHeads, config.EmbedDim, config.HeadDim))
+			shapes.Make(dtype, config.NumHeads, config.EmbedDim, config.HeadDim))
 		// C = 2, one dimension for key, the other for value.
-		// K = config.NumKVHeads
 		kvProjections := KernelEinsum(ctx.In("kv_einsum"), "BSD,CKDH->CBSKH", x,
-			shapes.Make(x.DType(), 2, config.NumKVHeads, config.EmbedDim, config.HeadDim))
+			shapes.Make(dtype, 2, config.NumKVHeads, config.EmbedDim, config.HeadDim))
 		keyProjection = Squeeze(Slice(kvProjections, AxisElem(0)), 0)
 		valueProjection = Squeeze(Slice(kvProjections, AxisElem(1)), 0)
 	}
@@ -175,8 +198,18 @@ func Attention(ctx *context.Context, config *Config, attentionIdx int, x, positi
 	}
 
 	// Finally, a linear transformation on the result, merging all the heads.
-	output := KernelEinsum(ctx.In("attn_vec_einsum"), "BTNH,NHD->BTD",
-		encoded,
-		shapes.Make(encoded.DType(), numQueryHeads, config.HeadDim, config.EmbedDim))
+	var output *Node
+	if config.HuggingFaceVersion {
+		outputProjectionWeights := ctx.In("hf").
+			VariableWithShape("o_proj", shapes.Make(dtype, config.EmbedDim, config.NumHeads*config.HeadDim)).
+			ValueGraph(g)
+		outputProjectionWeights = Reshape(outputProjectionWeights, config.EmbedDim, numQueryHeads, config.HeadDim)
+		output = Einsum("BTNH,DNH->BTD", encoded, outputProjectionWeights)
+
+	} else {
+		output = KernelEinsum(ctx.In("attn_vec_einsum"), "BTNH,NHD->BTD",
+			encoded,
+			shapes.Make(encoded.DType(), numQueryHeads, config.HeadDim, config.EmbedDim))
+	}
 	return output
 }

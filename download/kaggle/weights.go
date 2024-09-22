@@ -1,9 +1,11 @@
-// Package weights loads Gemma weights into tensors along with the matching metadata.
-package weights
+// Package kaggle loads Gemma weights into tensors along with the matching metadata, after they
+// have been downloaded from kaggle and converted using the included cmd/convert_checkpoint.py.
+package kaggle
 
 import (
 	"github.com/dustin/go-humanize"
 	"github.com/gomlx/gemma/trees"
+	"github.com/gomlx/gomlx/ml/context"
 	"github.com/gomlx/gomlx/ml/data"
 	"github.com/gomlx/gomlx/types/shapes"
 	"github.com/gomlx/gomlx/types/tensors"
@@ -30,10 +32,23 @@ const (
 
 // ReadConvertedWeights from checkpointDir (under the "raw/" subdirectory).
 // It will read the weights and shape converted by the `convert_checkpoint.py` script
+// (see github.com/gomlx/gemma repository, under cmd/convert_checkpoint.py) and set them
+// in the given context, under its current scope.
+func ReadConvertedWeights(ctx *context.Context, checkpointDir string) error {
+	weights, err := ReadConvertedWeightsToTree(checkpointDir)
+	if err != nil {
+		return err
+	}
+	UploadWeightsToContext(ctx.In("model"), weights)
+	return nil
+}
+
+// ReadConvertedWeightsToTree from checkpointDir (under the "raw/" subdirectory).
+// It will read the weights and shape converted by the `convert_checkpoint.py` script
 // (see github.com/gomlx/gemma repository, under cmd/convert_checkpoint.py)
 //
 // It returns a tree of tensors, with the path matching those of the original Jax checkpoint.
-func ReadConvertedWeights(checkpointDir string) (tree *trees.Tree[*tensors.Tensor], err error) {
+func ReadConvertedWeightsToTree(checkpointDir string) (tree *trees.Tree[*tensors.Tensor], err error) {
 	rawDir := path.Join(checkpointDir, "raw")
 	if !data.FileExists(rawDir) {
 		err = errors.Errorf(
@@ -163,4 +178,22 @@ func PyReadParamInfo(checkpointDir string) *trees.Tree[*PyParamInfo] {
 		}
 		return pi
 	})
+}
+
+// UploadWeightsToContext creates variables corresponding to the weights.
+// It returns the ctx given, with the variables set.
+//
+// It's tightly coupled with the model building functions in this package.
+// Meaning the modeling must match the naming here.
+func UploadWeightsToContext(ctx *context.Context, weights *trees.Tree[*tensors.Tensor]) {
+	weights = weights.Map["transformer"]
+	for treePath, tensor := range weights.Leaves() {
+		scopedCtx := ctx
+		scopeParts := treePath[:len(treePath)-1]
+		for _, p := range scopeParts {
+			scopedCtx = scopedCtx.In(p)
+		}
+		varName := treePath[len(treePath)-1]
+		_ = scopedCtx.VariableWithValue(varName, tensor)
+	}
 }

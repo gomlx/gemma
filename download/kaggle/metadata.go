@@ -1,4 +1,4 @@
-package weights
+package kaggle
 
 import (
 	"encoding/json"

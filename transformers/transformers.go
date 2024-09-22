@@ -86,7 +86,11 @@ func Block(ctx *context.Context, config *Config, attentionIdx int, x, positions 
 
 	// GatedFeedForward ("ffw") layer: 2 layers, with a gate.
 	output := RMSNorm(ctx.In("pre_ffw_norm"), attentionOut)
-	output = GatedFeedForward(ctx.In("mlp"), output, config.HiddenDim, config.TransposeGatingEinsum)
+	if config.HuggingFaceVersion {
+		output = HuggingFaceGatedFeedForward(ctx.In("mlp"), output, config.HiddenDim, config.TransposeGatingEinsum)
+	} else {
+		output = GatedFeedForward(ctx.In("mlp"), output, config.HiddenDim, config.TransposeGatingEinsum)
+	}
 	if config.UsePostFFWNorm {
 		output = RMSNorm(ctx.In("post_ffw_norm"), output)
 	}

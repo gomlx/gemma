@@ -2,14 +2,10 @@ package transformers
 
 import (
 	"github.com/gomlx/exceptions"
-	"github.com/gomlx/gemma/trees"
 	"github.com/gomlx/gomlx/ml/context"
-	"github.com/gomlx/gomlx/types/tensors"
 	"github.com/gomlx/gopjrt/dtypes"
 	"github.com/pkg/errors"
-	"maps"
 	"math"
-	"strings"
 )
 
 type GemmaType int
@@ -59,8 +55,6 @@ const (
 	QueryNormTypeByOneOverSqrtEmbedDimDivNumHeads
 )
 
-const VocabularySize = 256128 // Should come with the vocabulary, but it also defines the shape of the embedding table.
-
 // Config Gemma transformer model.
 type Config struct {
 	Type                GemmaType
@@ -68,7 +62,10 @@ type Config struct {
 	VocabularySize      int
 	NumLayers, NumEmbed int
 
-	//EmbedDim is also called "features" in the original code. It is the representation size (last dimension) of the output of the attention layers.
+	// HuggingFaceVersion has different shapes for some of the variables.
+	HuggingFaceVersion bool
+
+	// EmbedDim is also called "features" in the original code. It is the representation size (last dimension) of the output of the attention layers.
 	EmbedDim                             int
 	NumHeads, HeadDim                    int
 	HiddenDim                            int
@@ -88,31 +85,31 @@ type Config struct {
 	TransposeGatingEinsum  bool
 }
 
-// NewConfigFromWeights creates a transformers config model, based on the structure of the loaded model weights.
-func NewConfigFromWeights(weights *trees.Tree[*tensors.Tensor]) (*Config, error) {
+// NewConfigFromContext creates a transformers config model, based on the structure of the variables in the given context -- the scope
+// has to be set directly to the model variables.
+func NewConfigFromContext(ctx *context.Context) (*Config, error) {
 	c := &Config{
-		VocabularySize:        VocabularySize,
 		MaxCacheLength:        1024,
 		QueryPreAttentionNorm: QueryNormTypeByOneOverSqrtHeadDim,
 	}
 
-	for _, w := range weights.Leaves() {
-		if c.DType == dtypes.InvalidDType {
-			c.DType = w.DType()
-			continue
-		}
-		if c.DType != w.DType() {
-			return nil, errors.New("can't infer dtype, different parameters have different dtypes")
-		}
+	embedTable := ctx.In("embedder").InspectVariableInScope("input_embedding")
+	if embedTable == nil {
+		return nil, errors.New("context given doesn't have an embedding table defined in \"embedder/input_embedding\"")
 	}
 
-	// Find number of layers:
-	for key := range maps.Keys(weights.Map["transformer"].Map) {
-		if strings.Index(key, "layer") != -1 {
-			c.NumLayers++
-		}
-	}
+	c.DType = embedTable.Shape().DType
+	c.VocabularySize = embedTable.Shape().Dim(0)
+	c.HuggingFaceVersion = c.VocabularySize == 256000 // Kaggle version is 256128.
 
+	// Find number of layers.
+	for {
+		v := ctx.Inf("layer_%d", c.NumLayers).In("pre_attention_norm").InspectVariableInScope("scale")
+		if v == nil {
+			break
+		}
+		c.NumLayers++
+	}
 	if t, found := numLayersToGemmaClass[c.NumLayers]; found {
 		c.Type = t
 	}
@@ -147,25 +144,6 @@ func (c *Config) setGemma2_2B() {
 	c.QueryPreAttentionNorm = QueryNormTypeByOneOverSqrtHeadDim
 	c.AttentionLogitsSoftCap = 50.0
 	c.SlidingWindowSize = 4096
-}
-
-// UploadWeights creates variables corresponding to the weights.
-// It returns the ctx given, with the variables set.
-//
-// It's tightly coupled with the model building functions in this package.
-// Meaning the modeling must match the naming here.
-func (c *Config) UploadWeights(ctx *context.Context, weights *trees.Tree[*tensors.Tensor]) *context.Context {
-	weights = weights.Map["transformer"]
-	for treePath, tensor := range weights.Leaves() {
-		scopedCtx := ctx
-		scopeParts := treePath[:len(treePath)-1]
-		for _, p := range scopeParts {
-			scopedCtx = scopedCtx.In(p)
-		}
-		varName := treePath[len(treePath)-1]
-		_ = scopedCtx.VariableWithValue(varName, tensor)
-	}
-	return ctx
 }
 
 // QueryPreAttentionScalar is a multiplier to the query projections.
