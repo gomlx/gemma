@@ -9,8 +9,8 @@ require (
 	github.com/dustin/go-humanize v1.0.1
 	github.com/eliben/go-sentencepiece v0.5.0
 	github.com/gomlx/exceptions v0.0.3
-	github.com/gomlx/gomlx v0.11.0
-	github.com/gomlx/gopjrt v0.2.3
+	github.com/gomlx/gomlx v0.12.0
+	github.com/gomlx/gopjrt v0.4.0
 	github.com/janpfeifer/must v0.0.2
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.9.0
