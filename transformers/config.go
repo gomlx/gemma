@@ -93,7 +93,7 @@ func NewConfigFromContext(ctx *context.Context) (*Config, error) {
 		QueryPreAttentionNorm: QueryNormTypeByOneOverSqrtHeadDim,
 	}
 
-	embedTable := ctx.In("embedder").InspectVariableInScope("input_embedding")
+	embedTable := ctx.In("embedder").GetVariable("input_embedding")
 	if embedTable == nil {
 		return nil, errors.New("context given doesn't have an embedding table defined in \"embedder/input_embedding\"")
 	}
@@ -104,7 +104,7 @@ func NewConfigFromContext(ctx *context.Context) (*Config, error) {
 
 	// Find number of layers.
 	for {
-		v := ctx.Inf("layer_%d", c.NumLayers).In("pre_attention_norm").InspectVariableInScope("scale")
+		v := ctx.Inf("layer_%d", c.NumLayers).In("pre_attention_norm").GetVariable("scale")
 		if v == nil {
 			break
 		}

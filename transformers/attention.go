@@ -177,7 +177,7 @@ func Attention(ctx *context.Context, config *Config, attentionIdx int, x, positi
 	// Calculate attention weights.
 	const logitsMask = -2.3819763e38
 	paddedLogits := Where(
-		BroadcastToShape(ExpandDims(attentionMask, -2), logits.Shape()),
+		BroadcastToShape(ExpandAxes(attentionMask, -2), logits.Shape()),
 		logits,
 		Scalar(g, logits.DType(), logitsMask),
 	)

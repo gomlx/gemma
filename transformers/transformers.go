@@ -51,7 +51,7 @@ func GemmaWithCache(ctx *context.Context, config *Config,
 func EmbedTokens(ctx *context.Context, config *Config, currentTokens *Node) *Node {
 	g := currentTokens.Graph()
 	embedTableVar := ctx.VariableWithShape("input_embedding", shapes.Make(dtypes.BFloat16, config.VocabularySize, config.EmbedDim))
-	embeddings := Gather(embedTableVar.ValueGraph(g), ExpandDims(currentTokens, -1))
+	embeddings := Gather(embedTableVar.ValueGraph(g), ExpandAxes(currentTokens, -1))
 	embeddings = Mul(embeddings, Sqrt(Scalar(g, embeddings.DType(), config.EmbedDim)))
 	return embeddings
 }

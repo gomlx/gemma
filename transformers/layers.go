@@ -73,7 +73,7 @@ func ApplyRotaryPositionEncoding(operand, positions *Node, maxWaveLength int) *N
 	timeScale = ExpandLeftToRank(timeScale, positions.Rank()+1)
 
 	// Angles shape will add a rank to positions: we will take each position at a different wave length (or timeScale).
-	angles := ConvertDType(ExpandDims(positions, -1), transientDType)
+	angles := ConvertDType(ExpandAxes(positions, -1), transientDType)
 	angles = Div(angles, timeScale)
 
 	// Insert an axis just before the last until it matches the operand's shape.

@@ -208,7 +208,7 @@ func (s *Sampler) sampleStepGraphFn() func(*context.Context, []*Node) []*Node {
 		nextTokens = Where(
 			Or(
 				Equal(nextTokens, Const(g, int32(s.Vocab.PadID()))),
-				ExpandDims(done, -1),
+				ExpandAxes(done, -1),
 			),
 			nextPredictedTokens,
 			nextTokens,
